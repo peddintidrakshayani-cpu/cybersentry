@@ -99,6 +99,15 @@ sudo cat /var/log/auth.log | curl -X POST $B/api/ingest/ssh \
 The Loghub file (2,000 lines from an internet-facing server) raises five brute-force
 incidents, one per attacking IP. Set `CYBERSENTRY_DB` to use a different database file.
 
+**Live threat intel.** For real (public) IPs, `check_ip_reputation` asks two free,
+keyless sources: [GreyNoise Community](https://api.greynoise.io/v3/community/8.8.8.8)
+(is this IP attacking the internet right now?) and the
+[blocklist.de SSH list](https://lists.blocklist.de/lists/ssh.txt) (reported in the last
+48 h). Note the Loghub data is years old, so its IPs mostly come back "not observed";
+today's attackers come back `malicious`. Set `CYBERSENTRY_INTEL=off` to run fully
+offline, or `GREYNOISE_API_KEY` for a higher rate limit. The scripted scenarios keep
+their fixed intel because they use reserved documentation addresses.
+
 ---
 
 ## The five scenarios
@@ -149,5 +158,5 @@ From `smoke_test.py` on a clean database:
 
 Honest list, for the "future work" slide: the console is not wired to the API; there is
 no Postgres/Alembic path yet; no Docker, CI, or deployment; no pytest suite (the smoke
-test covers the same ground end-to-end); the threat-intel and asset lookups are local
-fixtures rather than live feeds.
+test covers the same ground end-to-end); IP reputation is live for real logs, but the
+asset and user-baseline lookups are still local fixtures.

@@ -104,6 +104,10 @@ report = detail.get("report") or {}
 check("the report describes the real attacker, not a scripted story",
       "5.188.10.180" in report.get("summary", "") and "j.martinez" not in json.dumps(report),
       report.get("summary", "")[:90])
+intel = [t["output"] for t in report.get("trace", []) if t["name"] == "check_ip_reputation"]
+check("real IPs are checked against live threat intel",
+      bool(intel) and ("GreyNoise" in intel[0] or "disabled" in intel[0]),
+      intel[0] if intel else "no reputation lookup in the trace")
 incidents += found
 
 print("\n-- 3. The agent explained itself ----------------------------------------")

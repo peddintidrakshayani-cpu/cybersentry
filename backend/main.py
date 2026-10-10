@@ -21,12 +21,14 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import re
 import secrets
 import sqlite3
 import time
+import urllib.error
 import urllib.request
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -574,10 +576,80 @@ def tool_search_events(con, username=None, src_ip=None, hostname=None, limit=50)
     return f"{len(rows)} events — {breakdown}" if rows else "no matching events"
 
 
+# Live threat intel for real addresses. Both sources are free and need no key:
+#   GreyNoise Community — is this IP scanning/attacking the internet right now?
+#   blocklist.de        — IPs reported attacking SSH servers in the last 48 hours.
+# Set CYBERSENTRY_INTEL=off to stay fully offline; GREYNOISE_API_KEY raises the rate limit.
+GREYNOISE_URL = "https://api.greynoise.io/v3/community/{ip}"
+BLOCKLIST_URL = "https://lists.blocklist.de/lists/ssh.txt"
+_intel_cache: dict[str, str] = {}
+_blocklist: dict[str, Any] = {"at": 0.0, "ips": None}
+
+
+def _intel_on() -> bool:
+    return os.getenv("CYBERSENTRY_INTEL", "on").lower() != "off"
+
+
+def _greynoise(ip: str) -> str:
+    headers = {"Accept": "application/json"}
+    if os.getenv("GREYNOISE_API_KEY"):
+        headers["key"] = os.environ["GREYNOISE_API_KEY"]
+    req = urllib.request.Request(GREYNOISE_URL.format(ip=ip), headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=4) as r:
+            d = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 404:  # GreyNoise answers 404 for "never seen"
+            return "GreyNoise: not observed scanning the internet"
+        if e.code == 429:
+            return "GreyNoise: rate limit reached, no verdict"
+        return f"GreyNoise: lookup failed (HTTP {e.code})"
+    except (OSError, ValueError) as e:
+        return f"GreyNoise: unavailable ({type(e).__name__})"
+    if d.get("riot"):
+        return f"GreyNoise: known benign service ({d.get('name', 'unknown')})"
+    if d.get("noise"):
+        return (f"GreyNoise: {d.get('classification', 'unknown')} · actively scanning the internet"
+                f" · last seen {d.get('last_seen', '?')}")
+    return f"GreyNoise: {d.get('message', 'no data')}"
+
+
+def _on_blocklist(ip: str) -> Optional[bool]:
+    """Refresh the list hourly. After a failure, wait 10 minutes before retrying so a
+    slow or rate-limiting server never stalls every investigation."""
+    age = time.time() - _blocklist["at"]
+    if (_blocklist["ips"] is None and age > 600) or age > 3600:
+        _blocklist["at"] = time.time()
+        try:
+            req = urllib.request.Request(BLOCKLIST_URL, headers={"User-Agent": "CyberSentry/1.0"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                _blocklist["ips"] = set(r.read(MAX_INGEST_BYTES).decode().split())
+        except OSError:
+            pass
+    return None if _blocklist["ips"] is None else ip in _blocklist["ips"]
+
+
 def tool_check_ip_reputation(ip: str) -> str:
     r = IP_REPUTATION.get(ip)
-    return (f"{r['verdict']} (score {r['score']}/100) · {r['notes']}" if r
-            else "unknown (score 0/100) · no abuse-feed records")
+    if r:  # the scripted scenarios use reserved documentation addresses with fixed intel
+        return f"{r['verdict']} (score {r['score']}/100) · {r['notes']}"
+    try:
+        if not ipaddress.ip_address(ip).is_global:
+            return "internal or reserved address · no external reputation"
+    except ValueError:
+        return f"'{ip}' is not an IP address"
+    if not _intel_on():
+        return "unknown · live threat intel disabled (CYBERSENTRY_INTEL=off)"
+    if ip in _intel_cache:
+        return _intel_cache[ip]
+    gn, listed = _greynoise(ip), _on_blocklist(ip)
+    bl = ("blocklist.de: reported attacking SSH in the last 48 h" if listed
+          else "blocklist.de: not listed in the last 48 h" if listed is False
+          else "blocklist.de: unavailable")
+    out = f"{gn} · {bl}"
+    if listed is not None and not any(w in gn for w in ("unavailable", "failed", "rate limit")):
+        _intel_cache[ip] = out  # only cache complete answers
+    return out
 
 
 def tool_check_domain_reputation(domain: str) -> str:
@@ -1068,6 +1140,7 @@ def health() -> dict[str, Any]:
                   for t in ("events", "incidents", "actions", "audit")}
     return {"status": "ok", "time": iso(utcnow()),
             "agent": "claude-opus-5" if claude_available() else "rule-based-analyzer",
+            "threat_intel": "greynoise+blocklist.de" if _intel_on() else "offline",
             "playbooks": len(PLAYBOOKS), "rules": len(RULES), **counts}
 
 
