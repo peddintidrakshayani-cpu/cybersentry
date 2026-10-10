@@ -23,16 +23,18 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import sqlite3
 import time
+import urllib.request
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator, Literal, Optional
 
 import jwt
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -41,7 +43,7 @@ from pydantic import BaseModel, Field
 # ─────────────────────────────────────────────────────────────────────────────
 # Config
 # ─────────────────────────────────────────────────────────────────────────────
-DB_PATH = Path(__file__).with_name("cybersentry.db")
+DB_PATH = Path(os.getenv("CYBERSENTRY_DB") or Path(__file__).with_name("cybersentry.db"))
 JWT_SECRET = os.getenv("CYBERSENTRY_SECRET", "dev-secret-change-in-production")
 JWT_ALG = "HS256"
 TOKEN_TTL_MIN = 480
@@ -310,6 +312,69 @@ SCENARIOS = {"S1": scenario_s1, "S2": scenario_s2, "S3": scenario_s3,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Real log ingestion — OpenSSH syslog lines (e.g. /var/log/auth.log, Loghub).
+# Real logs carry no attack label, so they are stored with hostile=0 and the
+# detection rules have to find the attacks on their own.
+# ─────────────────────────────────────────────────────────────────────────────
+# Fetchable sources are an allow-list, so the API can never be pointed at an
+# arbitrary URL (no server-side request forgery).
+LOG_SOURCES = {
+    "loghub-openssh": {
+        "url": "https://raw.githubusercontent.com/logpai/loghub/master/OpenSSH/OpenSSH_2k.log",
+        "about": "Loghub: 2,000 real sshd lines from an internet-facing lab server, full of brute-force attempts.",
+    },
+}
+MAX_INGEST_BYTES = 5_000_000
+
+_SYSLOG = re.compile(r"^(\w{3})\s+(\d{1,2})\s+(\d\d:\d\d:\d\d)\s+(\S+)\s+sshd\[\d+\]:\s+(.*)$")
+_IP = r"(\d{1,3}(?:\.\d{1,3}){3})"
+_SSH_PATTERNS = [
+    ("login_failed", re.compile(rf"Failed password for (?:invalid user\s+)?(\S*)\s+from {_IP}")),
+    ("login_success", re.compile(rf"Accepted \S+ for (\S+) from {_IP}")),
+    ("invalid_user", re.compile(rf"Invalid user\s+(\S*)\s*from {_IP}")),
+]
+_ANY_IP = re.compile(_IP)
+
+
+def _syslog_ts(mon: str, day: str, hms: str) -> str:
+    """Syslog omits the year; assume this year unless that lands in the future."""
+    now = utcnow()
+    dt = datetime.strptime(f"{now.year} {mon} {day} {hms}", "%Y %b %d %H:%M:%S").replace(tzinfo=timezone.utc)
+    if dt > now + timedelta(days=1):
+        dt = dt.replace(year=now.year - 1)
+    return iso(dt)
+
+
+def parse_ssh_line(line: str) -> Optional[dict[str, Any]]:
+    m = _SYSLOG.match(line.strip())
+    if not m:
+        return None
+    mon, day, hms, host, body = m.groups()
+    ev: dict[str, Any] = {"ts": _syslog_ts(mon, day, hms), "source": "ssh", "event_type": "ssh_info",
+                          "hostname": host, "message": line.strip()[:1000], "hostile": 0}
+    for event_type, pattern in _SSH_PATTERNS:
+        pm = pattern.search(body)
+        if pm:
+            ev.update(event_type=event_type, username=pm.group(1) or None, src_ip=pm.group(2))
+            return ev
+    ip = _ANY_IP.search(body)
+    if ip:
+        ev["src_ip"] = ip.group(1)
+    return ev
+
+
+def fetch_source(name: str) -> str:
+    src = LOG_SOURCES.get(name)
+    if not src:
+        raise HTTPException(404, f"Unknown source {name}. Try one of {list(LOG_SOURCES)}")
+    try:
+        with urllib.request.urlopen(src["url"], timeout=20) as r:
+            return r.read(MAX_INGEST_BYTES).decode("utf-8", "replace")
+    except OSError as exc:
+        raise HTTPException(502, f"Could not fetch {name}: {exc}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Detection engine — rules read raw events and correlate. No scenario labels.
 # ─────────────────────────────────────────────────────────────────────────────
 class Finding(BaseModel):
@@ -329,30 +394,40 @@ def risk_score(f: Finding) -> int:
     return min(100, SEV_BASE_RISK[f.severity] + min(6, len(f.event_ids) // 7) + int(f.confidence * 5))
 
 
-def r1_brute_force(rows: list[sqlite3.Row]) -> Optional[Finding]:
-    """A burst of failed logins from one IP followed by a success on the same account."""
+def r1_brute_force(rows: list[sqlite3.Row]) -> list[Finding]:
+    """A burst of failed logins from one IP. Critical if a success follows, high if not."""
     by_ip: dict[str, list[sqlite3.Row]] = {}
     for e in rows:
         if e["event_type"] == "login_failed" and e["src_ip"]:
             by_ip.setdefault(e["src_ip"], []).append(e)
+    out = []
     for ip, fails in by_ip.items():
         if len(fails) < 10:
             continue
         users = {f["username"] for f in fails}
         win = [e for e in rows if e["src_ip"] == ip]
         success = next((e for e in win if e["event_type"] == "login_success"), None)
-        if not success:
-            continue
         ids = [e["id"] for e in win]
-        return Finding(
-            rule_id="R1_BRUTE_FORCE", key=f"bruteforce:{ip}",
-            title=f"Brute-force succeeded on {success['username']} from {ip}",
-            severity="critical", confidence=0.94,
-            evidence=(f"{len(fails)} failed authentications from {ip} against "
-                      f"{len(users)} account(s), followed by a successful login as "
-                      f"{success['username']} with mfa=NOT_ENROLLED."),
-            event_ids=ids)
-    return None
+        if success:
+            mfa = re.search(r"mfa=(\S+)", success["message"])
+            out.append(Finding(
+                rule_id="R1_BRUTE_FORCE", key=f"bruteforce:{ip}",
+                title=f"Brute-force succeeded on {success['username']} from {ip}",
+                severity="critical", confidence=0.94,
+                evidence=(f"{len(fails)} failed authentications from {ip} against "
+                          f"{len(users)} account(s), followed by a successful login as "
+                          f"{success['username']}" + (f" with mfa={mfa.group(1)}." if mfa else ".")),
+                event_ids=ids))
+        else:
+            out.append(Finding(
+                rule_id="R1_BRUTE_FORCE", key=f"bruteforce:{ip}",
+                title=f"Brute-force attempt from {ip} ({len(fails)} failed logins)",
+                severity="high", confidence=0.9,
+                evidence=(f"{len(fails)} failed authentications from {ip} against "
+                          f"{len(users)} account(s). No successful login from this address "
+                          f"in the window, so the attack has not (yet) worked."),
+                event_ids=ids))
+    return out
 
 
 def r2_impossible_travel(rows: list[sqlite3.Row]) -> Optional[Finding]:
@@ -442,14 +517,13 @@ def detect(con: sqlite3.Connection, window: int = 200) -> list[Finding]:
     rows = list(reversed(rows))
     out: list[Finding] = []
     for rule in RULES:
-        f = rule(rows)
-        if not f:
-            continue
-        seen = con.execute(
-            "SELECT 1 FROM incidents WHERE correlation_key=? AND status!='resolved'",
-            (f.key,)).fetchone()
-        if not seen:
-            out.append(f)
+        hits = rule(rows)
+        for f in hits if isinstance(hits, list) else [hits] if hits else []:
+            seen = con.execute(
+                "SELECT 1 FROM incidents WHERE correlation_key=? AND status!='resolved'",
+                (f.key,)).fetchone()
+            if not seen:
+                out.append(f)
     return out
 
 
@@ -795,15 +869,99 @@ def investigate_deterministic(con: sqlite3.Connection, f: Finding) -> dict[str, 
     }
 
 
-def investigate(con: sqlite3.Connection, f: Finding) -> dict[str, Any]:
+RULE_MITRE = {
+    "R1_BRUTE_FORCE": [["T1110.001", "Password Guessing"]],
+    "R2_IMPOSSIBLE_TRAVEL": [["T1078", "Valid Accounts"]],
+    "R3_MALWARE_CHAIN": [["T1059.001", "PowerShell"], ["T1071.001", "Web Protocols (C2)"]],
+    "R4_PRIV_ESC": [["T1136.002", "Create Domain Account"], ["T1098", "Account Manipulation"]],
+    "R5_EXFIL": [["T1048", "Exfiltration Over Alternative Protocol"]],
+}
+
+
+def investigate_real(con: sqlite3.Connection, f: Finding) -> dict[str, Any]:
+    """Offline analyzer for ingested logs. Every sentence is built from the actual events
+    and tool outputs — nothing pre-written about named people or hosts."""
+    events = con.execute(
+        f"SELECT * FROM events WHERE id IN ({','.join('?' * len(f.event_ids))}) ORDER BY id",
+        f.event_ids).fetchall()
+    ips = sorted({e["src_ip"] for e in events if e["src_ip"]})
+    hosts = sorted({e["hostname"] for e in events if e["hostname"]})
+    users = sorted({e["username"] for e in events
+                    if e["username"] and e["event_type"] in ("login_failed", "invalid_user")})
+    success = [e for e in events if e["event_type"] == "login_success"]
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+    calls += [("search_events", {"src_ip": ip}) for ip in ips[:3]]
+    calls += [("check_ip_reputation", {"ip": ip}) for ip in ips[:3]]
+    calls += [("get_asset_info", {"hostname": h}) for h in hosts[:2]]
+    calls += [("get_user_history", {"username": e["username"]}) for e in success[:2]]
+    trace = []
+    for name, args in calls:
+        t0 = time.perf_counter()
+        out = run_tool(con, name, dict(args))
+        trace.append({"name": name, "args": args, "output": out,
+                      "ms": max(1, int((time.perf_counter() - t0) * 1000))})
+    rep = {t["args"].get("ip"): t["output"] for t in trace if t["name"] == "check_ip_reputation"}
+
+    first, last = events[0]["ts"], events[-1]["ts"]
+    fails = sum(1 for e in events if e["event_type"] == "login_failed")
+    shown_users = ", ".join(users[:8]) + (f" and {len(users) - 8} more" if len(users) > 8 else "")
+    chain = [f"{first} — first event from {', '.join(ips) or 'the source'} against {', '.join(hosts) or 'the target'}."]
+    if fails:
+        chain.append(f"Credential access — {fails} failed password attempts"
+                     + (f" across {len(users)} account name(s): {shown_users}." if users else "."))
+    for e in success:
+        chain.append(f"Initial access — successful login as {e['username']} at {e['ts']}.")
+    chain.append(f"{last} — last event in the correlation window.")
+
+    actions = [{"playbook": "block_ip", "target": ip,
+                "reason": f"Source of {fails} failed logins. Reputation: {rep.get(ip, 'not checked')}."}
+               for ip in ips[:3]]
+    actions.append({"playbook": "notify_team", "target": "soc-oncall",
+                    "reason": "Real attack traffic seen in production logs; an analyst should confirm the block."})
+    for e in success:
+        actions += [
+            {"playbook": "revoke_sessions", "target": e["username"],
+             "reason": "A login succeeded from the attacking address; end any session it opened."},
+            {"playbook": "reset_password", "target": e["username"],
+             "reason": "The password was guessed and must be rotated."},
+            {"playbook": "disable_user", "target": e["username"],
+             "reason": "Lock the account until the owner is verified. Needs human approval."},
+        ]
+
+    mitre = list(RULE_MITRE.get(f.rule_id, []))
+    if f.rule_id == "R1_BRUTE_FORCE" and len(users) > 3:
+        mitre = [["T1110.003", "Password Spraying"]]
+    if success:
+        mitre.append(["T1078", "Valid Accounts"])
+
+    return {
+        "summary": f"{f.title}. {f.evidence}",
+        "root_cause": (("The service accepts password logins from the internet, and one of the "
+                        "guessed passwords was correct.") if success else
+                       ("The service accepts password logins from the internet, so automated "
+                        "guessing reaches it. No guess has succeeded in these logs.")),
+        "attack_chain": chain,
+        "mitre": [{"id": i, "name": n} for i, n in mitre],
+        "affected_assets": [f"{h} (host)" for h in hosts] + [f"{ip} (external IP)" for ip in ips]
+                           + [f"{e['username']} (user)" for e in success],
+        "recommended_actions": actions,
+        "trace": trace, "analyzed_by": "rule-based-analyzer",
+    }
+
+
+def investigate(con: sqlite3.Connection, f: Finding, origin: str = "simulation") -> dict[str, Any]:
+    # The pre-written RULE_ANALYSIS stories describe the scripted scenarios only;
+    # ingested real logs get a report built from their own data.
+    offline = investigate_deterministic if origin == "simulation" else investigate_real
     if claude_available():
         try:
             return investigate_with_claude(con, f)
         except Exception as exc:  # the demo must never die because an API did
-            report = investigate_deterministic(con, f)
+            report = offline(con, f)
             report["fallback_reason"] = f"{type(exc).__name__}: {exc}"
             return report
-    return investigate_deterministic(con, f)
+    return offline(con, f)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -974,43 +1132,96 @@ async def simulate(scenario: str, user: Principal = Depends(require_admin)) -> d
     t0 = time.perf_counter()
     with db() as con:
         for ev in SCENARIOS[key]():
-            con.execute(
-                "INSERT INTO events (ts,source,event_type,username,src_ip,hostname,domain,geo,"
-                "bytes,message,hostile) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                (iso(utcnow()), ev["source"], ev["event_type"], ev.get("username"),
-                 ev.get("src_ip"), ev.get("hostname"), ev.get("domain"), ev.get("geo"),
-                 ev.get("bytes", 0), ev["message"], ev.get("hostile", 1)))
+            insert_event(con, {"ts": iso(utcnow()), "hostile": 1, **ev})
         audit(con, user.username, f"SIMULATE {key}", "attack injected into the event stream")
-
-        findings = detect(con)
-        detect_ms = int((time.perf_counter() - t0) * 1000)
-        created = []
-        for f in findings:
-            cur = con.execute(
-                "INSERT INTO incidents (ts,title,rule_id,correlation_key,severity,confidence,"
-                "risk_score,status,evidence,event_ids,detect_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                (iso(utcnow()), f.title, f.rule_id, f.key, f.severity, f.confidence,
-                 risk_score(f), "investigating", f.evidence, json.dumps(f.event_ids), detect_ms))
-            inc_id = cur.lastrowid
-            audit(con, "detection-engine", f"INCIDENT #{inc_id}",
-                  f"{f.rule_id} fired · {f.severity} · risk {risk_score(f)} · {detect_ms}ms")
-
-            report = investigate(con, f)
-            audit(con, report["analyzed_by"], f"REPORT #{inc_id}",
-                  f"root cause identified · {len(report['trace'])} tool calls · "
-                  f"{', '.join(m['id'] for m in report['mitre'])}")
-            action_ids = plan_response(con, inc_id, report)
-            respond_ms = int((time.perf_counter() - t0) * 1000)
-            con.execute(
-                "UPDATE incidents SET status=?,report=?,analyzed_by=?,respond_ms=? WHERE id=?",
-                ("contained", json.dumps(report), report["analyzed_by"], respond_ms, inc_id))
-            created.append({"incident_id": inc_id, "rule_id": f.rule_id, "severity": f.severity,
-                            "risk_score": risk_score(f), "detect_ms": detect_ms,
-                            "respond_ms": respond_ms, "actions": len(action_ids),
-                            "analyzed_by": report["analyzed_by"]})
+        created = run_pipeline(con, t0, origin="simulation")
     for c in created:
         await sockets.broadcast("incident", c)
     return {"scenario": key, "incidents": created}
+
+
+def insert_event(con: sqlite3.Connection, ev: dict[str, Any]) -> None:
+    con.execute(
+        "INSERT INTO events (ts,source,event_type,username,src_ip,hostname,domain,geo,"
+        "bytes,message,hostile) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (ev["ts"], ev["source"], ev["event_type"], ev.get("username"),
+         ev.get("src_ip"), ev.get("hostname"), ev.get("domain"), ev.get("geo"),
+         ev.get("bytes", 0), ev["message"], ev.get("hostile", 0)))
+
+
+def run_pipeline(con: sqlite3.Connection, t0: float, origin: str,
+                 window: int = 200) -> list[dict[str, Any]]:
+    """Detect -> investigate -> respond over the newest `window` events."""
+    findings = detect(con, window)
+    detect_ms = int((time.perf_counter() - t0) * 1000)
+    created = []
+    for f in findings:
+        cur = con.execute(
+            "INSERT INTO incidents (ts,title,rule_id,correlation_key,severity,confidence,"
+            "risk_score,status,evidence,event_ids,detect_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (iso(utcnow()), f.title, f.rule_id, f.key, f.severity, f.confidence,
+             risk_score(f), "investigating", f.evidence, json.dumps(f.event_ids), detect_ms))
+        inc_id = cur.lastrowid
+        audit(con, "detection-engine", f"INCIDENT #{inc_id}",
+              f"{f.rule_id} fired · {f.severity} · risk {risk_score(f)} · {detect_ms}ms")
+
+        report = investigate(con, f, origin)
+        audit(con, report["analyzed_by"], f"REPORT #{inc_id}",
+              f"root cause identified · {len(report['trace'])} tool calls · "
+              f"{', '.join(m['id'] for m in report['mitre'])}")
+        action_ids = plan_response(con, inc_id, report)
+        respond_ms = int((time.perf_counter() - t0) * 1000)
+        con.execute(
+            "UPDATE incidents SET status=?,report=?,analyzed_by=?,respond_ms=? WHERE id=?",
+            ("contained", json.dumps(report), report["analyzed_by"], respond_ms, inc_id))
+        created.append({"incident_id": inc_id, "rule_id": f.rule_id, "severity": f.severity,
+                        "title": f.title, "risk_score": risk_score(f), "detect_ms": detect_ms,
+                        "respond_ms": respond_ms, "actions": len(action_ids),
+                        "analyzed_by": report["analyzed_by"]})
+    return created
+
+
+async def ingest_ssh_text(text: str, user: Principal, label: str) -> dict:
+    t0 = time.perf_counter()
+    lines = text.splitlines()
+    parsed = [ev for ev in map(parse_ssh_line, lines) if ev]
+    if not parsed:
+        raise HTTPException(422, "No OpenSSH syslog lines found "
+                                 "(expected e.g. 'Dec 10 06:55:46 host sshd[123]: Failed password ...')")
+    kinds: dict[str, int] = {}
+    with db() as con:
+        for ev in parsed:
+            insert_event(con, ev)
+            kinds[ev["event_type"]] = kinds.get(ev["event_type"], 0) + 1
+        audit(con, user.username, "INGEST ssh",
+              f"{label} · {len(parsed)} of {len(lines)} lines parsed")
+        created = run_pipeline(con, t0, origin="ingest", window=len(parsed))
+    for c in created:
+        await sockets.broadcast("incident", c)
+    return {"source": label, "lines": len(lines), "events": len(parsed),
+            "by_type": kinds, "incidents": created}
+
+
+@app.get("/api/ingest/sources", tags=["ingest"])
+def ingest_sources(user: Principal = Depends(current_user)) -> dict:
+    """Real public log sources the server is allowed to fetch."""
+    return LOG_SOURCES
+
+
+@app.post("/api/ingest/source/{name}", tags=["ingest"])
+async def ingest_source(name: str, user: Principal = Depends(require_admin)) -> dict:
+    """Download a real log file from an allow-listed source, then detect, investigate and respond."""
+    return await ingest_ssh_text(fetch_source(name), user, name)
+
+
+@app.post("/api/ingest/ssh", tags=["ingest"])
+async def ingest_ssh(request: Request, user: Principal = Depends(require_admin)) -> dict:
+    """Upload raw OpenSSH log text as the request body, e.g.
+    `curl --data-binary @/var/log/auth.log -H 'Content-Type: text/plain' ...`"""
+    body = await request.body()
+    if len(body) > MAX_INGEST_BYTES:
+        raise HTTPException(413, f"Body larger than {MAX_INGEST_BYTES} bytes")
+    return await ingest_ssh_text(body.decode("utf-8", "replace"), user, "upload")
 
 
 @app.get("/api/actions/pending", tags=["actions"])

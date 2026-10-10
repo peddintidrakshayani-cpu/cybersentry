@@ -68,12 +68,36 @@ the evaluation metrics at the end.
 | GET | `/api/events` | any |
 | GET | `/api/incidents` · `/api/incidents/{id}` | any |
 | POST | `/api/simulate/{S1..S5}` | admin |
+| GET | `/api/ingest/sources` | any |
+| POST | `/api/ingest/source/{name}` · `/api/ingest/ssh` | admin |
 | GET | `/api/actions/pending` | any |
 | POST | `/api/actions/{id}/approve` · `/reject` | any (high risk: admin only) |
 | POST | `/api/actions/{id}/rollback` | any |
 | GET | `/api/audit` · `/api/audit/verify` | any |
 | GET | `/api/metrics` · `/health` | any / — |
 | WS | `/ws` | — |
+
+### Real logs
+
+Besides the five scripted scenarios, the backend ingests real OpenSSH syslog lines
+(`/var/log/auth.log` format). Real lines carry no attack label; the same rules have to
+find the attacks, and the report is built from the actual events and lookups.
+
+```bash
+B=http://127.0.0.1:8000
+TOKEN=$(curl -s -X POST $B/api/auth/login -d 'username=admin&password=cybersentry' \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
+
+# 1. Let the server fetch a real public dataset (allow-listed sources only)
+curl -X POST $B/api/ingest/source/loghub-openssh -H "Authorization: Bearer $TOKEN"
+
+# 2. Or upload any sshd log yourself — e.g. your own machine's auth log
+sudo cat /var/log/auth.log | curl -X POST $B/api/ingest/ssh \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/plain" --data-binary @-
+```
+
+The Loghub file (2,000 lines from an internet-facing server) raises five brute-force
+incidents, one per attacking IP. Set `CYBERSENTRY_DB` to use a different database file.
 
 ---
 
