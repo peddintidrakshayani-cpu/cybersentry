@@ -947,7 +947,7 @@ function kpisHtml() {
   if (S.live && S.metrics) {
     const m = S.metrics;
     return kpiRow(m.events_ingested.toLocaleString(),
-      `${m.events_hostile.toLocaleString()} labelled hostile · ${(m.events_ingested - m.events_hostile).toLocaleString()} unlabelled`,
+      `${(m.events_ingested - m.events_hostile).toLocaleString()} benign · ${m.events_hostile.toLocaleString()} hostile`,
       m.open_incidents, m.incidents, m.mttd_ms ?? "—", m.mttr_ms ?? "—", "ms", m.noise_reduction_pct, m.auto_containment_pct);
   }
   const open = S.incidents.filter(i => i.status !== "resolved").length;

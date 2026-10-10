@@ -66,6 +66,9 @@ status, health = call("/health")
 check("API is up", status == 200, f"agent: {health.get('agent')} | "
                                  f"{health.get('rules')} rules | {health.get('playbooks')} playbooks")
 admin, analyst = token_for("admin"), token_for("analyst")
+if call("/api/stream", token=admin)[1].get("running"):
+    sys.exit("The live stream is running and would add incidents mid-test. Start the API with "
+             "CYBERSENTRY_STREAM=off (and a fresh database) to run this test.")
 check("admin and analyst can sign in", bool(admin and analyst))
 check("a wrong password is rejected",
       call("/api/auth/login", form={"username": "admin", "password": "wrong"})[0] == 401)

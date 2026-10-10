@@ -60,7 +60,7 @@ python -m uvicorn main:app --port 8000      # or: start.bat
 ### Prove it works
 
 ```bash
-python smoke_test.py      # in a second terminal, with the API running
+python smoke_test.py      # second terminal; API started with CYBERSENTRY_STREAM=off
 ```
 
 Nineteen checks across the whole pipeline: auth and role enforcement, all five attack
@@ -127,8 +127,11 @@ curl -X POST "$B/api/stream/stop" -H "Authorization: Bearer $TOKEN"
   (event source `ssh-replay`), and loops at the end.
 - `tail` follows a real, growing log file: start the server with
   `CYBERSENTRY_TAIL=/var/log/auth.log` (the path is server config, never a request field).
-- Detection runs every 5 s over the newest 400 events. `CYBERSENTRY_STREAM=replay` starts
-  the stream with the server; `CYBERSENTRY_STREAM_RATE` sets lines per second.
+- Detection runs every 5 s over the newest 400 events. The stream **starts with the
+  server** (replay, 3 lines/s): set `CYBERSENTRY_STREAM=off` to disable it (required for
+  `smoke_test.py`), `tail` to follow a file, and `CYBERSENTRY_STREAM_RATE` for the speed.
+- An event counts as hostile when a scenario labelled it or an incident cites it as
+  evidence; an attacker's protocol chatter (disconnects, PAM notes) is not counted.
 
 **Live threat intel.** For real (public) IPs, `check_ip_reputation` asks two free,
 keyless sources: [GreyNoise Community](https://api.greynoise.io/v3/community/8.8.8.8)

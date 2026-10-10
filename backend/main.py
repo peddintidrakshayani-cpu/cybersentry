@@ -428,7 +428,9 @@ def r1_brute_force(rows: list[sqlite3.Row]) -> list[Finding]:
         if len(fails) < 10:
             continue
         users = {f["username"] for f in fails}
-        win = [e for e in rows if e["src_ip"] == ip]
+        # Evidence only: the attempts and anything they led to, not the source's
+        # protocol chatter (disconnects, PAM notes), which is not itself hostile.
+        win = [e for e in rows if e["src_ip"] == ip and e["event_type"] != "ssh_info"]
         success = next((e for e in win if e["event_type"] == "login_success"), None)
         ids = [e["id"] for e in win]
         if success:
@@ -549,7 +551,7 @@ def r6_user_enum(rows: list[sqlite3.Row]) -> list[Finding]:
             evidence=(f"{ip} tried {len(users)} account names that do not exist on this server "
                       f"({shown}{', ...' if len(users) > 8 else ''}). Attackers do this to find "
                       f"which usernames are real before guessing passwords."),
-            event_ids=[e["id"] for e in rows if e["src_ip"] == ip]))
+            event_ids=[e["id"] for e in rows if e["src_ip"] == ip and e["event_type"] == "invalid_user"]))
     return out
 
 
@@ -656,7 +658,13 @@ def _intel_on() -> bool:
     return os.getenv("CYBERSENTRY_INTEL", "on").lower() != "off"
 
 
+_greynoise_paused_until = 0.0
+
+
 def _greynoise(ip: str) -> str:
+    global _greynoise_paused_until
+    if time.time() < _greynoise_paused_until:
+        return "GreyNoise: rate limit reached, no verdict"
     headers = {"Accept": "application/json"}
     if os.getenv("GREYNOISE_API_KEY"):
         headers["key"] = os.environ["GREYNOISE_API_KEY"]
@@ -668,6 +676,7 @@ def _greynoise(ip: str) -> str:
         if e.code == 404:  # GreyNoise answers 404 for "never seen"
             return "GreyNoise: not observed scanning the internet"
         if e.code == 429:
+            _greynoise_paused_until = time.time() + 600
             return "GreyNoise: rate limit reached, no verdict"
         return f"GreyNoise: lookup failed (HTTP {e.code})"
     except (OSError, ValueError) as e:
@@ -1189,13 +1198,16 @@ sockets = Sockets()
 @app.on_event("startup")
 def _startup() -> None:
     init_db()
-    # CYBERSENTRY_STREAM=replay (or tail) starts the live stream with the server.
-    if os.getenv("CYBERSENTRY_STREAM"):
-        try:
-            stream.start(os.environ["CYBERSENTRY_STREAM"],
-                         float(os.getenv("CYBERSENTRY_STREAM_RATE", "2")), "system")
-        except HTTPException as exc:
-            print(f"live stream not started: {exc.detail}")
+    # The live stream starts with the server so the console always has data flowing.
+    # CYBERSENTRY_STREAM picks the source (replay | tail); "off" disables it.
+    source = os.getenv("CYBERSENTRY_STREAM", "replay").lower()
+    if source != "off":
+        def boot() -> None:  # the first download can be slow; never delay startup
+            try:
+                stream.start(source, float(os.getenv("CYBERSENTRY_STREAM_RATE", "3")), "system")
+            except HTTPException as exc:
+                print(f"live stream not started: {exc.detail}")
+        threading.Thread(target=boot, daemon=True).start()
 
 
 @app.on_event("shutdown")
@@ -1641,7 +1653,12 @@ def verify_audit(user: Principal = Depends(current_user)) -> dict:
 def metrics(user: Principal = Depends(current_user)) -> dict:
     with db() as con:
         ev = con.execute("SELECT COUNT(*) c FROM events").fetchone()["c"]
-        hostile = con.execute("SELECT COUNT(*) c FROM events WHERE hostile=1").fetchone()["c"]
+        # Hostile = labelled by a threat scenario, or correlated into any incident
+        # (real logs carry no label; the rules are what mark them hostile).
+        hostile_ids = {r["id"] for r in con.execute("SELECT id FROM events WHERE hostile=1")}
+        for r in con.execute("SELECT event_ids FROM incidents"):
+            hostile_ids.update(json.loads(r["event_ids"]))
+        hostile = len(hostile_ids)
         incs = con.execute("SELECT * FROM incidents").fetchall()
         acts = con.execute("SELECT * FROM actions").fetchall()
         sev = {s: sum(1 for i in incs if i["severity"] == s)
