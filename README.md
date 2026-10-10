@@ -1,1 +1,129 @@
-# cybersentry
+# CyberSentry — Detect. Explain. Respond.
+
+AI-powered autonomous security incident response. Hackathon problem **TH2-PS-GAI-006**.
+
+```
+INGEST ──▶ DETECT ──▶ INVESTIGATE ──▶ RESPOND ──▶ AUDIT
+ logs      5 rules +   agent with       8 playbooks   append-only
+           correlation autonomous      + human        hash-chained
+                       tool use        approval       trail
+```
+
+**The safety story, in one line:** the agent may only *propose* from eight whitelisted
+playbooks. Low- and medium-risk actions contain themselves automatically; **high-risk
+actions wait for a named human**. The AI never executes anything, and every action has
+an undo step.
+
+---
+
+## Two pieces, deliberately independent
+
+| Piece | What it is | Why it exists |
+|---|---|---|
+| [`demo.html`](demo.html) | The SOC console prototype. One self-contained file — React-free vanilla JS, Tailwind-free hand-written CSS, no build step, no network. The engine is simulated in-page. | **This is what you present.** It cannot fail on stage: no server, no ports, no npm. Double-click it. |
+| [`backend/`](backend/) | A real FastAPI service: SQLite, JWT with roles, the five detection rules, the investigation agent, the guard-railed response engine, the hash-chained audit trail. | **This is what you show judges who ask "is it real?"** Open `/docs`, run the smoke test. |
+
+The console does not call the backend. That is a deliberate choice for a live demo —
+the prototype is risk-free, and the API is proven separately by its own test.
+
+---
+
+## Run the console
+
+Double-click `demo.html`, or open the published copy:
+<https://claude.ai/artifact/5LPx6yzTrDUMrNENFPt3LP>
+
+Sign in with the pre-filled credentials (`admin` / `cybersentry`), then either click a
+single attack button or **▶ Run full demo** to play the whole flow hands-free.
+
+## Run the backend
+
+```bash
+cd backend
+pip install -r requirements.txt
+python -m uvicorn main:app --port 8000      # or: start.bat
+```
+
+- Swagger UI: <http://127.0.0.1:8000/docs>
+- Health: <http://127.0.0.1:8000/health>
+- Logins: `admin` / `cybersentry` (full control) and `analyst` / `cybersentry` (cannot
+  approve high-risk actions, cannot launch simulations)
+
+### Prove it works
+
+```bash
+python smoke_test.py      # in a second terminal, with the API running
+```
+
+Nineteen checks across the whole pipeline: auth and role enforcement, all five attack
+scenarios detected and handled, report completeness, the approval guard-rail, rollback,
+and a tamper test that edits a past audit row and shows the chain detect it. It prints
+the evaluation metrics at the end.
+
+### API surface
+
+| Method | Path | Role |
+|---|---|---|
+| POST | `/api/auth/login` | — |
+| GET | `/api/events` | any |
+| GET | `/api/incidents` · `/api/incidents/{id}` | any |
+| POST | `/api/simulate/{S1..S5}` | admin |
+| GET | `/api/actions/pending` | any |
+| POST | `/api/actions/{id}/approve` · `/reject` | any (high risk: admin only) |
+| POST | `/api/actions/{id}/rollback` | any |
+| GET | `/api/audit` · `/api/audit/verify` | any |
+| GET | `/api/metrics` · `/health` | any / — |
+| WS | `/ws` | — |
+
+---
+
+## The five scenarios
+
+| ID | Scenario | Rule | MITRE ATT&CK |
+|---|---|---|---|
+| S1 | Brute force → successful login | `R1_BRUTE_FORCE` | T1110.003, T1078.004 |
+| S2 | Impossible travel | `R2_IMPOSSIBLE_TRAVEL` | T1078, T1114.003 |
+| S3 | Phishing → malware → C2 beacon | `R3_MALWARE_CHAIN` | T1566.001, T1059.001, T1547.001, T1071.001 |
+| S4 | Privilege escalation to Domain Admin | `R4_PRIV_ESC` | T1136.002, T1098 |
+| S5 | Off-hours data exfiltration | `R5_EXFIL` | T1005, T1560.001, T1048 |
+
+The rules are given raw events with no scenario label and have to correlate them
+themselves — `R1` genuinely counts failed logins per source IP and looks for a
+subsequent success.
+
+## The agent
+
+`GET /health` reports which analyzer is active.
+
+- **With `ANTHROPIC_API_KEY` set and `pip install anthropic`** — Claude runs a real
+  tool-use loop over five read-only tools (`search_events`, `check_ip_reputation`,
+  `check_domain_reputation`, `get_user_history`, `get_asset_info`), decides for itself
+  what to look up, and submits a structured report via a `submit_report` tool.
+- **Without a key** — a deterministic analyzer calls the same read-only tools and
+  returns the same report shape, so a demo never depends on the network.
+
+Either way the agent's output is a *recommendation*. `plan_response()` drops anything
+not in `PLAYBOOKS`, and `AUTO_EXECUTE` decides what runs without a human.
+
+Prompt-injection posture: log text reaches the agent strictly as data, the tools are
+read-only, and the only verbs the agent can emit are playbook names.
+
+## Measured on this machine
+
+From `smoke_test.py` on a clean database:
+
+| Metric | Value |
+|---|---|
+| Mean time to detect | **92 ms** |
+| Mean time to respond (detect → contained) | **161 ms** |
+| Noise reduction | **91.5 %** of events never reach an analyst |
+| Auto-contained actions | **14 of 20 (70 %)** |
+| Actions held for a human | **5** (every one of them high-risk) |
+| Audit chain | 39 entries, verified; tampering detected at the edited row |
+
+## Not built
+
+Honest list, for the "future work" slide: the console is not wired to the API; there is
+no Postgres/Alembic path yet; no Docker, CI, or deployment; no pytest suite (the smoke
+test covers the same ground end-to-end); the threat-intel and asset lookups are local
+fixtures rather than live feeds.
