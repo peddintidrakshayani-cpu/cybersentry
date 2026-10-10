@@ -111,7 +111,8 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY, ts TEXT NOT NULL, source TEXT NOT NULL, event_type TEXT NOT NULL,
   username TEXT, src_ip TEXT, hostname TEXT, domain TEXT, geo TEXT,
-  bytes INTEGER DEFAULT 0, message TEXT NOT NULL, hostile INTEGER DEFAULT 0);
+  bytes INTEGER DEFAULT 0, message TEXT NOT NULL, hostile INTEGER DEFAULT 0,
+  ingested_at TEXT);
 CREATE TABLE IF NOT EXISTS incidents (
   id INTEGER PRIMARY KEY, ts TEXT NOT NULL, title TEXT NOT NULL, rule_id TEXT NOT NULL,
   correlation_key TEXT NOT NULL, severity TEXT NOT NULL, confidence REAL NOT NULL,
@@ -147,6 +148,9 @@ def hash_pwd(pwd: str, salt: str) -> str:
 def init_db() -> None:
     with db() as con:
         con.executescript(SCHEMA)
+        # Databases created before ingested_at existed get the column added in place.
+        if "ingested_at" not in {r["name"] for r in con.execute("PRAGMA table_info(events)")}:
+            con.execute("ALTER TABLE events ADD COLUMN ingested_at TEXT")
         if not con.execute("SELECT 1 FROM users").fetchone():
             for username, pwd, role in [
                 ("admin", "cybersentry", "admin"),
@@ -1336,10 +1340,25 @@ async def simulate(scenario: str, user: Principal = Depends(require_admin)) -> d
 def insert_event(con: sqlite3.Connection, ev: dict[str, Any]) -> None:
     con.execute(
         "INSERT INTO events (ts,source,event_type,username,src_ip,hostname,domain,geo,"
-        "bytes,message,hostile) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        "bytes,message,hostile,ingested_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (ev["ts"], ev["source"], ev["event_type"], ev.get("username"),
          ev.get("src_ip"), ev.get("hostname"), ev.get("domain"), ev.get("geo"),
-         ev.get("bytes", 0), ev["message"], ev.get("hostile", 0)))
+         ev.get("bytes", 0), ev["message"], ev.get("hostile", 0), iso(utcnow())))
+
+
+def _arrival(con: sqlite3.Connection, event_ids: list[int]) -> Optional[datetime]:
+    """When the newest piece of evidence reached CyberSentry. Time-to-detect and
+    time-to-respond are measured from here, as a SOC measures them, so the wait
+    between a line arriving and the next detection pass is included."""
+    if not event_ids:
+        return None
+    row = con.execute(f"SELECT MAX(ingested_at) m FROM events WHERE id IN "
+                      f"({','.join('?' * len(event_ids))})", event_ids).fetchone()
+    return datetime.fromisoformat(row["m"]) if row and row["m"] else None
+
+
+def _ms_since(dt: datetime) -> int:
+    return max(0, int((utcnow() - dt).total_seconds() * 1000))
 
 
 def run_pipeline(con: sqlite3.Connection, t0: float, origin: str,
@@ -1351,27 +1370,28 @@ def run_pipeline(con: sqlite3.Connection, t0: float, origin: str,
     one, and recording each result. Clicks and the live stream never wait on the network."""
     with WRITE_LOCK:
         findings = detect(con, window)
-        detect_ms = int((time.perf_counter() - t0) * 1000)
         claimed = []
         for f in findings:
+            arrived = _arrival(con, f.event_ids)
+            detect_ms = _ms_since(arrived) if arrived else int((time.perf_counter() - t0) * 1000)
             cur = con.execute(
                 "INSERT INTO incidents (ts,title,rule_id,correlation_key,severity,confidence,"
                 "risk_score,status,evidence,event_ids,detect_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (iso(utcnow()), f.title, f.rule_id, f.key, f.severity, f.confidence,
                  risk_score(f), "investigating", f.evidence, json.dumps(f.event_ids), detect_ms))
-            claimed.append((f, cur.lastrowid))
+            claimed.append((f, cur.lastrowid, arrived, detect_ms))
             audit(con, "detection-engine", f"INCIDENT #{cur.lastrowid}",
                   f"{f.rule_id} fired · {f.severity} · risk {risk_score(f)} · {detect_ms}ms")
 
     created = []
-    for f, inc_id in claimed:
+    for f, inc_id, arrived, detect_ms in claimed:
         report = investigate(con, f, origin)
         with WRITE_LOCK:
             audit(con, report["analyzed_by"], f"REPORT #{inc_id}",
                   f"root cause identified · {len(report['trace'])} tool calls · "
                   f"{', '.join(m['id'] for m in report['mitre'])}")
             action_ids = plan_response(con, inc_id, report)
-            respond_ms = int((time.perf_counter() - t0) * 1000)
+            respond_ms = _ms_since(arrived) if arrived else int((time.perf_counter() - t0) * 1000)
             con.execute(
                 "UPDATE incidents SET status=?,report=?,analyzed_by=?,respond_ms=? WHERE id=?",
                 ("contained", json.dumps(report), report["analyzed_by"], respond_ms, inc_id))

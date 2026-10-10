@@ -948,7 +948,7 @@ function kpisHtml() {
     const m = S.metrics;
     return kpiRow(m.events_ingested.toLocaleString(),
       `${(m.events_ingested - m.events_hostile).toLocaleString()} benign · ${m.events_hostile.toLocaleString()} hostile`,
-      m.open_incidents, m.incidents, m.mttd_ms ?? "—", m.mttr_ms ?? "—", "ms", m.noise_reduction_pct, m.auto_containment_pct);
+      m.open_incidents, m.incidents, secs(m.mttd_ms), secs(m.mttr_ms), "s", m.noise_reduction_pct, m.auto_containment_pct);
   }
   const open = S.incidents.filter(i => i.status !== "resolved").length;
   const mttd = S.incidents.length ? (S.incidents.reduce((a, i) => a + +i.mttd, 0) / S.incidents.length).toFixed(1) : "—";
@@ -960,6 +960,7 @@ function kpisHtml() {
     `${S.benign.toLocaleString()} benign · ${(S.ingested - S.benign).toLocaleString()} hostile`,
     open, S.incidents.length, mttd, mttr, "s", reduction, auto);
 }
+const secs = ms => ms == null ? "—" : (ms / 1000).toFixed(ms < 10000 ? 1 : 0);
 function kpiRow(events, eventsSub, open, total, mttd, mttr, unit, reduction, auto) {
   return `<div class="kpis">
     <div class="kpi"><div class="k">Events ingested</div><div class="v">${events}</div><div class="s">${eventsSub}</div></div>
