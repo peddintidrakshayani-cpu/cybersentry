@@ -16,21 +16,29 @@ an undo step.
 
 ---
 
-## Two pieces, deliberately independent
+## Two pieces, one console
 
 | Piece | What it is | Why it exists |
 |---|---|---|
-| [`demo.html`](demo.html) | The SOC console prototype. One self-contained file — React-free vanilla JS, Tailwind-free hand-written CSS, no build step, no network. The engine is simulated in-page. | **This is what you present.** It cannot fail on stage: no server, no ports, no npm. Double-click it. |
+| [`demo.html`](demo.html) | The SOC console. One self-contained file — vanilla JS, hand-written CSS, no build step. **Live** when served by the backend; falls back to an in-page simulation when opened as a file. | **This is what you present.** Live, it shows real data; offline, it cannot fail on stage. |
 | [`backend/`](backend/) | A real FastAPI service: SQLite, JWT with roles, the five detection rules, the investigation agent, the guard-railed response engine, the hash-chained audit trail. | **This is what you show judges who ask "is it real?"** Open `/docs`, run the smoke test. |
 
-The console does not call the backend. That is a deliberate choice for a live demo —
-the prototype is risk-free, and the API is proven separately by its own test.
+**Live mode** — open <http://127.0.0.1:8000/> with the backend running. The console
+detects the API and every number, event, incident, approval and audit row comes from it
+(top bar: *connected to API*). It has no fake background traffic, adds a **Real logs**
+card (fetch Loghub, or upload your own `auth.log`), and polls every 3 s, so logs ingested
+with curl show up on their own.
+
+**Offline mode** — double-click `demo.html`, or the API is unreachable. The backend is
+simulated in-page with a scripted agent (top bar: *offline demo*), so a demo never
+depends on a server.
 
 ---
 
 ## Run the console
 
-Double-click `demo.html`, or open the published copy:
+Start the backend (below) and open <http://127.0.0.1:8000/> for live mode. For the
+offline version, double-click `demo.html`, or open the published copy:
 <https://claude.ai/artifact/5LPx6yzTrDUMrNENFPt3LP>
 
 Sign in with the pre-filled credentials (`admin` / `cybersentry`), then either click a
@@ -156,7 +164,7 @@ From `smoke_test.py` on a clean database:
 
 ## Not built
 
-Honest list, for the "future work" slide: the console is not wired to the API; there is
+Honest list, for the "future work" slide: there is
 no Postgres/Alembic path yet; no Docker, CI, or deployment; no pytest suite (the smoke
 test covers the same ground end-to-end); IP reputation is live for real logs, but the
 asset and user-baseline lookups are still local fixtures.

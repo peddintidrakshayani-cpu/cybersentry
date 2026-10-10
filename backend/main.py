@@ -1263,11 +1263,13 @@ async def ingest_ssh_text(text: str, user: Principal, label: str) -> dict:
                                  "(expected e.g. 'Dec 10 06:55:46 host sshd[123]: Failed password ...')")
     kinds: dict[str, int] = {}
     with db() as con:
+        con.execute("BEGIN")  # one transaction: thousands of single-row commits are slow
         for ev in parsed:
             insert_event(con, ev)
             kinds[ev["event_type"]] = kinds.get(ev["event_type"], 0) + 1
         audit(con, user.username, "INGEST ssh",
               f"{label} · {len(parsed)} of {len(lines)} lines parsed")
+        con.execute("COMMIT")
         created = run_pipeline(con, t0, origin="ingest", window=len(parsed))
     for c in created:
         await sockets.broadcast("incident", c)
@@ -1295,6 +1297,12 @@ async def ingest_ssh(request: Request, user: Principal = Depends(require_admin))
     if len(body) > MAX_INGEST_BYTES:
         raise HTTPException(413, f"Body larger than {MAX_INGEST_BYTES} bytes")
     return await ingest_ssh_text(body.decode("utf-8", "replace"), user, "upload")
+
+
+@app.get("/api/actions", tags=["actions"])
+def list_actions(user: Principal = Depends(current_user)) -> list[dict]:
+    with db() as con:
+        return [dict(r) for r in con.execute("SELECT * FROM actions ORDER BY id DESC")]
 
 
 @app.get("/api/actions/pending", tags=["actions"])
@@ -1386,7 +1394,12 @@ def metrics(user: Principal = Depends(current_user)) -> dict:
         sev = {s: sum(1 for i in incs if i["severity"] == s)
                for s in ("critical", "high", "medium", "low")}
         auto = sum(1 for a in acts if a["decided_by"] is None and a["status"] == "executed")
+        by_hour = [0] * 24  # by the hour the event happened (UTC), not when it was ingested
+        for r in con.execute("SELECT substr(ts,12,2) h, COUNT(*) c FROM events GROUP BY h"):
+            if (r["h"] or "").isdigit():
+                by_hour[int(r["h"]) % 24] = r["c"]
         return {
+            "events_by_hour_utc": by_hour,
             "events_ingested": ev, "events_hostile": hostile, "incidents": len(incs),
             "incidents_by_severity": sev,
             "open_incidents": sum(1 for i in incs if i["status"] != "resolved"),
