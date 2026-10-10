@@ -146,6 +146,18 @@ status, undone = call(f"/api/actions/{held['id']}/rollback", token=admin, post=T
 check("every executed action can be rolled back",
       status == 200 and undone["status"] == "rolled_back", undone.get("result", ""))
 
+s1 = next(i for i in incidents if i["rule_id"] == "R1_BRUTE_FORCE" and i["severity"] == "critical")
+check("re-running an attack with an open incident raises nothing new",
+      call("/api/simulate/S1", token=admin, post=True)[1].get("incidents") == [])
+status, closed = call(f"/api/incidents/{s1['incident_id']}/resolve", token=analyst, post=True)
+check("an analyst can resolve an incident", status == 200 and closed["status"] == "resolved")
+check("an incident cannot be resolved twice",
+      call(f"/api/incidents/{s1['incident_id']}/resolve", token=admin, post=True)[0] == 409)
+status, again = call("/api/simulate/S1", token=admin, post=True)
+check("after resolving, the same attack raises a fresh incident",
+      status == 200 and len(again.get("incidents", [])) == 1,
+      f"new incident #{again['incidents'][0]['incident_id']}" if again.get("incidents") else "none")
+
 print("\n-- 5. The audit trail is tamper-evident ---------------------------------")
 status, verified = call("/api/audit/verify", token=admin)
 check("the hash chain verifies", verified["ok"], f"{verified['entries']} entries")

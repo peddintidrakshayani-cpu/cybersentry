@@ -647,6 +647,14 @@ function rollback(id) {
   toast(`${a.playbook} rolled back — ${a.target} restored`);
   paintAll();
 }
+function resolve(id) {
+  if (S.live) return liveResolve(id);
+  const i = S.incidents.find(x => x.id === id); if (!i) return;
+  i.status = "resolved";
+  audit(S.user.name, `RESOLVE #${i.id}`, `${i.title} — closed by analyst`);
+  toast(`Incident #${i.id} resolved — the same attack will now raise a new incident`);
+  paintAll();
+}
 function verify() {
   if (S.live) return liveVerify();
   const rows = [...S.audit].reverse();
@@ -700,7 +708,8 @@ function mapIncident(x, old) {
     confidence: x.confidence, risk: x.risk_score, status: x.status, evidence: x.evidence, at: new Date(x.ts),
     mttd: (x.detect_ms / 1000).toFixed(2), mttr: x.respond_ms ? (x.respond_ms / 1000).toFixed(2) : null,
     analyzedBy: x.analyzed_by, eventIds: JSON.parse(x.event_ids || "[]"),
-    tools: old ? old.tools : [], events: old ? old.events : [], report: old ? old.report : null };
+    tools: old ? old.tools : [], events: old ? old.events : [], report: old ? old.report : null,
+    pending: old && old.status === x.status ? old.pending : null };  // status changed → refetch
 }
 
 /* Pull everything the console shows from the API. */
@@ -777,7 +786,7 @@ async function liveLaunch(key) {
     const res = await API.post(`/api/simulate/${key}`);
     await sync();
     if (res.incidents.length) await revealResult(res.incidents);
-    else toast(`${key} injected — no new incident, because an open incident already covers this attack.`, "warn");
+    else toast(`${key} injected — an open incident already covers this attack. Resolve it to raise a new one.`, "warn");
   } catch (e) { toast(`Scenario failed: ${e.message}`, "warn"); }
   S.busy = false;
   paintAll();
@@ -807,6 +816,15 @@ async function liveAct(id, verb) {
     toast({ approve: `${a.playbook} executed on ${a.target}`,
       reject: `${a.playbook} rejected — no change made to ${a.target}`,
       rollback: `${a.playbook} rolled back — ${a.target} restored` }[verb], verb === "reject" ? "warn" : "");
+  } catch (e) { toast(e.message, "warn"); }
+  paintAll();
+}
+
+async function liveResolve(id) {
+  try {
+    await API.post(`/api/incidents/${id}/resolve`);
+    await sync();
+    toast(`Incident #${id} resolved — the same attack will now raise a new incident`);
   } catch (e) { toast(e.message, "warn"); }
   paintAll();
 }
@@ -873,6 +891,7 @@ function paintToast() {
 }
 
 const SEVS = ["critical", "high", "medium", "low"];
+const statusTag = s => ({ contained: "tag-ok", resolved: "tag-no" }[s] || "tag-wait");
 const sevBadge = s => `<span class="sev sev-${s}">${s}</span>`;
 const riskRing = n => `<span class="risk" style="color:${n >= 90 ? "var(--sev-critical)" : n >= 75 ? "var(--sev-high)" : "var(--sev-medium)"}">${n}</span>`;
 
@@ -1026,7 +1045,7 @@ function incRow(i) {
     ${riskRing(i.risk)}
     <span><span class="t">${esc(i.title)}</span><span class="meta">${sevBadge(i.severity)}
       <span class="tag">#${i.id}</span><span class="tag">${i.rule}</span>
-      <span class="tag ${i.status === "contained" ? "tag-ok" : "tag-wait"}">${i.status}</span>
+      <span class="tag ${statusTag(i.status)}">${i.status}</span>
       ${held ? `<span class="tag tag-wait"><svg width="9" height="9" style="vertical-align:-1px"><use href="#i-lock"/></svg> ${held} awaiting approval</span>` : ""}
       <span class="tag tag-no">${hhmmss(i.at)}</span></span></span>
     <span class="chev">›</span></button>`;
@@ -1046,7 +1065,9 @@ function detailView() {
           <span class="tag">#${i.id}</span><span class="tag">${i.rule}</span>
           <span class="tag">confidence ${Math.round(i.confidence * 100)}%</span>
           <span class="tag tag-ok">detected in ${i.mttd}s</span>
-          ${i.mttr ? `<span class="tag tag-ok">responded in ${i.mttr}s</span>` : ""}</span></span>
+          ${i.mttr ? `<span class="tag tag-ok">responded in ${i.mttr}s</span>` : ""}
+          <span class="tag ${statusTag(i.status)}">${i.status}</span></span></span>
+      ${i.status !== "resolved" && i.report ? `<button class="btn btn-sm btn-good" data-resolve="${i.id}">✓ Mark resolved</button>` : ""}
     </header>
     <div class="body" style="padding-top:12px"><p style="margin:0;font-size:13px;color:var(--dim);line-height:1.6"><b style="color:var(--ink)">Why this fired:</b> ${esc(i.evidence)}</p></div>
   </section>
@@ -1140,7 +1161,7 @@ function paintAll() {
 
 /* ── Events ──────────────────────────────────────────────────────────────── */
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-go],[data-inc],[data-atk],[data-approve],[data-reject],[data-rollback],[data-verify],[data-logout],[data-role],[data-ingest],[data-upload],[data-stream]");
+  const t = e.target.closest("[data-go],[data-inc],[data-atk],[data-approve],[data-reject],[data-rollback],[data-verify],[data-logout],[data-role],[data-ingest],[data-upload],[data-stream],[data-resolve]");
   if (!t) return;
   if (t.dataset.role) {
     [...t.parentElement.children].forEach(b => b.setAttribute("aria-pressed", b === t));
@@ -1155,6 +1176,7 @@ document.addEventListener("click", e => {
   if (t.hasAttribute("data-verify")) return verify();
   if (t.dataset.ingest) return liveIngest(t.dataset.ingest);
   if (t.dataset.stream) return liveStream(t.dataset.stream);
+  if (t.dataset.resolve) return resolve(+t.dataset.resolve);
   if (t.hasAttribute("data-upload")) return $("#logfile").click();
   if (t.hasAttribute("data-logout")) { S.user = null; S.token = null; S.route = "dashboard"; return paintAll(); }
 });

@@ -75,6 +75,7 @@ the evaluation metrics at the end.
 | POST | `/api/auth/login` | — |
 | GET | `/api/events` | any |
 | GET | `/api/incidents` · `/api/incidents/{id}` | any |
+| POST | `/api/incidents/{id}/resolve` | any |
 | POST | `/api/simulate/{S1..S5}` | admin |
 | GET | `/api/ingest/sources` · `/api/stream` | any |
 | POST | `/api/stream/start` · `/api/stream/stop` | admin |
@@ -105,8 +106,14 @@ sudo cat /var/log/auth.log | curl -X POST $B/api/ingest/ssh \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/plain" --data-binary @-
 ```
 
-The Loghub file (2,000 lines from an internet-facing server) raises five brute-force
-incidents, one per attacking IP. Set `CYBERSENTRY_DB` to use a different database file.
+Two extra rules apply to real SSH logs: `R6_USER_ENUM` (one IP trying 5+ account names
+that do not exist, medium) and `R7_SSH_PROBE` (5+ addresses connecting without ever
+attempting a login, low). The Loghub file (2,000 lines from an internet-facing server)
+raises 11 incidents: 6 brute force (high), 4 username enumeration (medium), 1 probing (low).
+
+An open incident suppresses repeats of the same attack (same correlation key). **Resolve**
+it (button on the incident, or `POST /api/incidents/{id}/resolve`) and the next
+occurrence raises a fresh incident. Set `CYBERSENTRY_DB` to use a different database file.
 
 **Live stream.** To keep events flowing continuously (instead of one batch), start the
 stream from the console's *Real logs* card, or with the API:
