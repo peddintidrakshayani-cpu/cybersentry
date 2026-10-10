@@ -777,7 +777,7 @@ async function liveLaunch(key) {
     await sync();
     if (res.incidents.length) await revealResult(res.incidents);
     else toast(`${key} injected — no new incident, because an open incident already covers this attack.`, "warn");
-  } catch (e) { toast(`Simulation failed: ${e.message}`, "warn"); }
+  } catch (e) { toast(`Scenario failed: ${e.message}`, "warn"); }
   S.busy = false;
   paintAll();
 }
@@ -862,7 +862,7 @@ function loginView() {
       <div><b>CyberSentry</b><div class="tag">Detect · Explain · Respond</div></div></div>
     <form class="lcard" id="loginform">
       <h2 style="font-size:16px;margin-bottom:4px">Sign in to the console</h2>
-      <p style="color:var(--mute);font-size:12.5px;margin:0 0 18px">Autonomous security incident response · TH2-PS-GAI-006</p>
+      <p style="color:var(--mute);font-size:12.5px;margin:0 0 18px">Autonomous security incident response</p>
       <div class="role-pick" role="group" aria-label="Role">
         <button type="button" data-role="admin" aria-pressed="true">Admin</button>
         <button type="button" data-role="analyst" aria-pressed="false">Analyst</button>
@@ -870,7 +870,7 @@ function loginView() {
       <label class="field"><span>Username</span><input id="u" value="admin" autocomplete="username"></label>
       <label class="field"><span>Password</span><input id="p" type="password" value="cybersentry" autocomplete="current-password"></label>
       <button class="btn btn-primary btn-wide" type="submit">Sign in</button>
-      <p class="hint">${S.live ? "<b>Connected to the CyberSentry API</b> — everything you see is stored in the backend. " : "<b>Offline demo</b> — no API reachable, so the backend is simulated in this page. "}Demo credentials are pre-filled. <b>Admin</b> can launch attack simulations and approve high-risk actions; <b>Analyst</b> can investigate and approve low and medium risk only.</p>
+      <p class="hint">${S.live ? "<b>Connected to the CyberSentry API.</b> " : "<b>Standalone mode</b> — the API is not reachable; running on built-in data. "}Default credentials are pre-filled. <b>Admin</b> can run threat scenarios, ingest logs and approve high-risk actions; <b>Analyst</b> can investigate and approve low and medium risk only.</p>
     </form></div></div>`;
 }
 
@@ -896,7 +896,7 @@ function shellView() {
     <div id="main">
       <header id="topbar">
         <h1>${titles[S.route]}</h1>
-        <span class="pill"><span class="dot live"></span>${S.live ? "connected to API" : "offline demo"}</span>
+        <span class="pill"><span class="dot live"></span>${S.live ? "connected to API" : "standalone"}</span>
         <span class="pill">${S.ingested.toLocaleString()} events</span>
         <span class="pill" id="clock">${hhmmss(new Date())}</span>
       </header>
@@ -908,7 +908,7 @@ function kpisHtml() {
   if (S.live && S.metrics) {
     const m = S.metrics;
     return kpiRow(m.events_ingested.toLocaleString(),
-      `${m.events_hostile.toLocaleString()} simulated · ${(m.events_ingested - m.events_hostile).toLocaleString()} real/unlabelled`,
+      `${m.events_hostile.toLocaleString()} labelled hostile · ${(m.events_ingested - m.events_hostile).toLocaleString()} unlabelled`,
       m.open_incidents, m.incidents, m.mttd_ms ?? "—", m.mttr_ms ?? "—", "ms", m.noise_reduction_pct, m.auto_containment_pct);
   }
   const open = S.incidents.filter(i => i.status !== "resolved").length;
@@ -938,15 +938,15 @@ function dashView() {
   const vmax = Math.max(1, ...S.vol);
   return `${kpisHtml()}
   <section class="card redteam">
-    <header><svg width="14" height="14"><use href="#i-bolt"/></svg><h3>Attack simulator</h3>
+    <header><svg width="14" height="14"><use href="#i-bolt"/></svg><h3>Threat scenarios</h3>
       <span class="eyebrow">${S.user.role === "admin" ? "admin only" : "requires admin"}</span></header>
     <div class="body">
-      <p style="margin:0 0 12px;color:var(--dim);font-size:12.5px;max-width:62ch">Inject a scripted attack into the ${S.live ? "backend's" : "live"} log stream. CyberSentry detects, investigates and responds to it in front of you — nothing is pre-computed.</p>
+      <p style="margin:0 0 12px;color:var(--dim);font-size:12.5px;max-width:62ch">Replay a known attack pattern into the log stream. CyberSentry detects, investigates and responds to it in front of you.</p>
       <div class="atk">
         ${Object.entries(SCENARIOS).map(([k, s]) => `<button data-atk="${k}" ${S.user.role !== "admin" || S.busy ? "disabled" : ""}>
           <b>${esc(s.label)}</b><span>${k} · ${s.mitre}</span></button>`).join("")}
         <button data-atk="full" ${S.user.role !== "admin" || S.busy ? "disabled" : ""} style="border-color:var(--accent-dim);background:#171C33">
-          <b>▶ Run full demo</b><span>detect → investigate → approve → audit</span></button>
+          <b>▶ Run end-to-end</b><span>detect → investigate → approve → audit</span></button>
       </div>
     </div>
   </section>
@@ -993,7 +993,7 @@ function paintKpis() {
 }
 
 function incidentsView() {
-  if (!S.incidents.length) return `<section class="card"><div class="empty">No incidents yet.<br>Go to the dashboard and launch an attack simulation.</div></section>`;
+  if (!S.incidents.length) return `<section class="card"><div class="empty">No incidents yet.<br>Run a threat scenario or ingest logs from the dashboard.</div></section>`;
   return `<section class="card"><header><h3>All incidents</h3><span class="eyebrow">sorted by risk</span></header>
     <div class="ilist">${[...S.incidents].sort((a, b) => b.risk - a.risk).map(incRow).join("")}</div></section>`;
 }
@@ -1036,7 +1036,7 @@ function detailView() {
       <section class="card">
         <div class="aibar">
           ${rep ? `<svg width="15" height="15"><use href="#i-check"/></svg><b style="font:600 13px var(--disp)">Investigation complete</b>
-            <span class="pill">${i.tools.length} tool calls</span><span class="pill">${esc(i.analyzedBy || "scripted demo")}</span>`
+            <span class="pill">${i.tools.length} tool calls</span><span class="pill">${esc(i.analyzedBy || "cybersentry-agent")}</span>`
       : `<div class="spin" style="margin:0"></div><b style="font:600 13px var(--disp)" class="typing">Agent investigating</b>
             <span class="pill">autonomous tool use</span>`}
         </div>

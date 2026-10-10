@@ -30,7 +30,7 @@ card (fetch Loghub, or upload your own `auth.log`), and polls every 3 s, so logs
 with curl show up on their own.
 
 **Offline mode** — double-click `demo.html`, or the API is unreachable. The backend is
-simulated in-page with a scripted agent (top bar: *offline demo*), so a demo never
+simulated in-page with a scripted agent (top bar: *standalone*), so a demo never
 depends on a server.
 
 ---
@@ -42,7 +42,7 @@ offline version, double-click `demo.html`, or open the published copy:
 <https://claude.ai/artifact/5LPx6yzTrDUMrNENFPt3LP>
 
 Sign in with the pre-filled credentials (`admin` / `cybersentry`), then either click a
-single attack button or **▶ Run full demo** to play the whole flow hands-free.
+single attack button or **▶ Run end-to-end** to play the whole flow hands-free.
 
 ## Run the backend
 
