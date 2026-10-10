@@ -19,6 +19,7 @@ Docs: http://127.0.0.1:8000/docs
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import ipaddress
@@ -27,6 +28,7 @@ import os
 import re
 import secrets
 import sqlite3
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -129,7 +131,7 @@ CREATE TABLE IF NOT EXISTS audit (
 
 @contextmanager
 def db() -> Iterator[sqlite3.Connection]:
-    con = sqlite3.connect(DB_PATH, isolation_level=None)
+    con = sqlite3.connect(DB_PATH, isolation_level=None, timeout=30)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys=ON")
     try:
@@ -165,14 +167,21 @@ def chain_hash(prev_hash: str, ts: str, actor: str, action: str, detail: str) ->
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+# Every audit append reads the chain head and writes the next link. Two writers doing
+# that at once would both link to the same head and fork the chain, so all audit writes,
+# and any transaction that contains one, hold this process-wide lock.
+WRITE_LOCK = threading.RLock()
+
+
 def audit(con: sqlite3.Connection, actor: str, action: str, detail: str) -> None:
-    row = con.execute("SELECT hash FROM audit ORDER BY seq DESC LIMIT 1").fetchone()
-    prev = row["hash"] if row else "0" * 64
-    ts = iso(utcnow())
-    con.execute(
-        "INSERT INTO audit (ts,actor,action,detail,prev_hash,hash) VALUES (?,?,?,?,?,?)",
-        (ts, actor, action, detail, prev, chain_hash(prev, ts, actor, action, detail)),
-    )
+    with WRITE_LOCK:
+        row = con.execute("SELECT hash FROM audit ORDER BY seq DESC LIMIT 1").fetchone()
+        prev = row["hash"] if row else "0" * 64
+        ts = iso(utcnow())
+        con.execute(
+            "INSERT INTO audit (ts,actor,action,detail,prev_hash,hash) VALUES (?,?,?,?,?,?)",
+            (ts, actor, action, detail, prev, chain_hash(prev, ts, actor, action, detail)),
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1110,6 +1119,18 @@ sockets = Sockets()
 @app.on_event("startup")
 def _startup() -> None:
     init_db()
+    # CYBERSENTRY_STREAM=replay (or tail) starts the live stream with the server.
+    if os.getenv("CYBERSENTRY_STREAM"):
+        try:
+            stream.start(os.environ["CYBERSENTRY_STREAM"],
+                         float(os.getenv("CYBERSENTRY_STREAM_RATE", "2")), "system")
+        except HTTPException as exc:
+            print(f"live stream not started: {exc.detail}")
+
+
+@app.on_event("shutdown")
+def _shutdown() -> None:
+    stream.stop_evt.set()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1202,12 +1223,15 @@ async def simulate(scenario: str, user: Principal = Depends(require_admin)) -> d
     key = scenario.upper()
     if key not in SCENARIOS:
         raise HTTPException(404, f"Unknown scenario {scenario}. Try one of {list(SCENARIOS)}")
-    t0 = time.perf_counter()
-    with db() as con:
-        for ev in SCENARIOS[key]():
-            insert_event(con, {"ts": iso(utcnow()), "hostile": 1, **ev})
-        audit(con, user.username, f"SIMULATE {key}", "attack injected into the event stream")
-        created = run_pipeline(con, t0, origin="simulation")
+    def work() -> list[dict[str, Any]]:
+        t0 = time.perf_counter()
+        with db() as con:
+            for ev in SCENARIOS[key]():
+                insert_event(con, {"ts": iso(utcnow()), "hostile": 1, **ev})
+            audit(con, user.username, f"SIMULATE {key}", "attack injected into the event stream")
+            return run_pipeline(con, t0, origin="simulation")
+
+    created = await asyncio.to_thread(work)
     for c in created:
         await sockets.broadcast("incident", c)
     return {"scenario": key, "incidents": created}
@@ -1225,6 +1249,11 @@ def insert_event(con: sqlite3.Connection, ev: dict[str, Any]) -> None:
 def run_pipeline(con: sqlite3.Connection, t0: float, origin: str,
                  window: int = 200) -> list[dict[str, Any]]:
     """Detect -> investigate -> respond over the newest `window` events."""
+    with WRITE_LOCK:
+        return _run_pipeline(con, t0, origin, window)
+
+
+def _run_pipeline(con: sqlite3.Connection, t0: float, origin: str, window: int) -> list[dict[str, Any]]:
     findings = detect(con, window)
     detect_ms = int((time.perf_counter() - t0) * 1000)
     created = []
@@ -1255,26 +1284,162 @@ def run_pipeline(con: sqlite3.Connection, t0: float, origin: str,
 
 
 async def ingest_ssh_text(text: str, user: Principal, label: str) -> dict:
-    t0 = time.perf_counter()
     lines = text.splitlines()
     parsed = [ev for ev in map(parse_ssh_line, lines) if ev]
     if not parsed:
         raise HTTPException(422, "No OpenSSH syslog lines found "
                                  "(expected e.g. 'Dec 10 06:55:46 host sshd[123]: Failed password ...')")
     kinds: dict[str, int] = {}
-    with db() as con:
-        con.execute("BEGIN")  # one transaction: thousands of single-row commits are slow
-        for ev in parsed:
-            insert_event(con, ev)
-            kinds[ev["event_type"]] = kinds.get(ev["event_type"], 0) + 1
-        audit(con, user.username, "INGEST ssh",
-              f"{label} · {len(parsed)} of {len(lines)} lines parsed")
-        con.execute("COMMIT")
-        created = run_pipeline(con, t0, origin="ingest", window=len(parsed))
+    for ev in parsed:
+        kinds[ev["event_type"]] = kinds.get(ev["event_type"], 0) + 1
+
+    def work() -> list[dict[str, Any]]:
+        t0 = time.perf_counter()
+        with db() as con, WRITE_LOCK:
+            con.execute("BEGIN")  # one transaction: thousands of single-row commits are slow
+            for ev in parsed:
+                insert_event(con, ev)
+            audit(con, user.username, "INGEST ssh",
+                  f"{label} · {len(parsed)} of {len(lines)} lines parsed")
+            con.execute("COMMIT")
+            return run_pipeline(con, t0, origin="ingest", window=len(parsed))
+
+    created = await asyncio.to_thread(work)
     for c in created:
         await sockets.broadcast("incident", c)
     return {"source": label, "lines": len(lines), "events": len(parsed),
             "by_type": kinds, "incidents": created}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Live stream — keeps events flowing in the background, line by line, and runs
+# detection every few seconds, the way a SIEM consumes a log pipeline.
+#   replay — the real Loghub sshd lines, re-sent one by one and stamped with the
+#            time they arrive (source "ssh-replay", so they are never mistaken
+#            for this machine's own traffic). Loops when it reaches the end.
+#   tail   — follows a real log file as it grows, e.g. /var/log/auth.log. The
+#            path comes from the CYBERSENTRY_TAIL setting, never from a request.
+# ─────────────────────────────────────────────────────────────────────────────
+STREAM_DETECT_EVERY = 5.0
+STREAM_WINDOW = 400
+
+
+class LiveStream:
+    def __init__(self) -> None:
+        self.stop_evt = threading.Event()
+        self.thread: Optional[threading.Thread] = None
+        self.state: dict[str, Any] = {"running": False, "source": None, "rate": None, "lines": 0,
+                                      "incidents": 0, "started": None, "error": None}
+
+    def sources(self) -> list[str]:
+        return ["replay"] + (["tail"] if os.getenv("CYBERSENTRY_TAIL") else [])
+
+    def start(self, source: str, rate: float, actor: str) -> dict[str, Any]:
+        if self.state["running"]:
+            raise HTTPException(409, "The stream is already running")
+        if source not in self.sources():
+            raise HTTPException(400, f"Unknown or unconfigured source '{source}'. "
+                                     f"Available: {self.sources()} (tail needs CYBERSENTRY_TAIL)")
+        if source == "replay":
+            lines: Any = [l for l in fetch_source("loghub-openssh").splitlines() if l.strip()]
+            label = "loghub-openssh replay"
+        else:
+            path = os.environ["CYBERSENTRY_TAIL"]
+            if not os.access(path, os.R_OK):
+                raise HTTPException(400, f"Cannot read {path}")
+            lines, label = path, f"tail {path}"
+        rate = max(0.2, min(rate, 20.0))
+        self.stop_evt.clear()
+        self.state.update(running=True, source=source, rate=rate, lines=0, incidents=0,
+                          started=iso(utcnow()), error=None)
+        with db() as con:
+            audit(con, actor, "STREAM START", f"{label} · {rate:g} lines/s")
+        self.thread = threading.Thread(target=self._run, args=(source, lines, rate), daemon=True)
+        self.thread.start()
+        return self.state
+
+    def stop(self, actor: str) -> dict[str, Any]:
+        if self.state["running"]:
+            self.stop_evt.set()
+            if self.thread:
+                self.thread.join(timeout=10)
+            with db() as con:
+                audit(con, actor, "STREAM STOP",
+                      f"{self.state['lines']} lines streamed · {self.state['incidents']} incident(s)")
+        return self.state
+
+    @staticmethod
+    def _replay(lines: list[str]) -> Iterator[Optional[str]]:
+        while True:
+            yield from lines
+
+    def _tail(self, path: str) -> Iterator[Optional[str]]:
+        f = open(path, errors="replace")
+        f.seek(0, os.SEEK_END)
+        inode = os.fstat(f.fileno()).st_ino
+        try:
+            while True:
+                line = f.readline()
+                if line:
+                    yield line
+                    continue
+                yield None  # nothing new yet
+                try:
+                    st = os.stat(path)
+                except OSError:
+                    continue
+                if st.st_ino != inode or st.st_size < f.tell():  # rotated or truncated
+                    f.close()
+                    f = open(path, errors="replace")
+                    inode = os.fstat(f.fileno()).st_ino
+        finally:
+            f.close()
+
+    def _run(self, source: str, lines: Any, rate: float) -> None:
+        feed = self._replay(lines) if source == "replay" else self._tail(lines)
+        last_detect = time.monotonic()
+        try:
+            with db() as con:
+                for line in feed:
+                    if self.stop_evt.is_set():
+                        break
+                    ev = parse_ssh_line(line) if line else None
+                    if ev:
+                        if source == "replay":
+                            ev.update(ts=iso(utcnow()), source="ssh-replay")
+                        insert_event(con, ev)
+                        self.state["lines"] += 1
+                    if source == "replay" or line is None:
+                        self.stop_evt.wait(1 / rate if source == "replay" else 0.5)
+                    if time.monotonic() - last_detect >= STREAM_DETECT_EVERY:
+                        last_detect = time.monotonic()
+                        created = run_pipeline(con, time.perf_counter(), origin="ingest",
+                                               window=STREAM_WINDOW)
+                        self.state["incidents"] += len(created)
+        except Exception as exc:  # report it on /api/stream instead of dying silently
+            self.state["error"] = f"{type(exc).__name__}: {exc}"
+        finally:
+            self.state["running"] = False
+
+
+stream = LiveStream()
+
+
+@app.get("/api/stream", tags=["stream"])
+def stream_status(user: Principal = Depends(current_user)) -> dict:
+    return {**stream.state, "sources": stream.sources()}
+
+
+@app.post("/api/stream/start", tags=["stream"])
+def stream_start(source: str = "replay", rate: float = 2.0,
+                 user: Principal = Depends(require_admin)) -> dict:
+    """Start feeding log lines continuously. `rate` is lines per second (0.2–20)."""
+    return {**stream.start(source, rate, user.username), "sources": stream.sources()}
+
+
+@app.post("/api/stream/stop", tags=["stream"])
+def stream_stop(user: Principal = Depends(require_admin)) -> dict:
+    return {**stream.stop(user.username), "sources": stream.sources()}
 
 
 @app.get("/api/ingest/sources", tags=["ingest"])
@@ -1286,7 +1451,7 @@ def ingest_sources(user: Principal = Depends(current_user)) -> dict:
 @app.post("/api/ingest/source/{name}", tags=["ingest"])
 async def ingest_source(name: str, user: Principal = Depends(require_admin)) -> dict:
     """Download a real log file from an allow-listed source, then detect, investigate and respond."""
-    return await ingest_ssh_text(fetch_source(name), user, name)
+    return await ingest_ssh_text(await asyncio.to_thread(fetch_source, name), user, name)
 
 
 @app.post("/api/ingest/ssh", tags=["ingest"])

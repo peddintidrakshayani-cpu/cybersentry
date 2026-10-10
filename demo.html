@@ -290,7 +290,7 @@ function fnv(str) {
 const S = {
   route: "dashboard", user: null, events: [], incidents: [], actions: [], audit: [],
   ingested: 1247, benign: 1247, openId: null, busy: false, fresh: null, toast: null,
-  live: false, token: null, metrics: null,
+  live: false, token: null, metrics: null, stream: null,
   vol: Array.from({ length: 24 }, (_, i) => 18 + Math.round(26 * Math.sin((i - 3) / 3.4) ** 2) + (i % 3) * 4),
 };
 
@@ -705,9 +705,10 @@ function mapIncident(x, old) {
 
 /* Pull everything the console shows from the API. */
 async function sync() {
-  const [events, incidents, actions, trail, metrics] = await Promise.all([
+  const [events, incidents, actions, trail, metrics, stream] = await Promise.all([
     API.call("/api/events?limit=160"), API.call("/api/incidents"), API.call("/api/actions"),
-    API.call("/api/audit"), API.call("/api/metrics")]);
+    API.call("/api/audit"), API.call("/api/metrics"), API.call("/api/stream")]);
+  S.stream = stream;
   const old = new Map(S.incidents.map(i => [i.id, i]));
   S.incidents = incidents.map(x => mapIncident(x, old.get(x.id)));
   const flagged = new Set(S.incidents.flatMap(i => i.eventIds));
@@ -820,6 +821,21 @@ async function liveVerify() {
   paintAll();
 }
 
+function streamStat() {
+  const st = S.stream;
+  if (!st) return "";
+  if (st.running) return `${st.source} · ${st.rate} lines/s · ${st.lines.toLocaleString()} streamed · ${st.incidents} incident(s)`;
+  return st.error ? `stopped — ${st.error}` : "continuous feed · new lines every second";
+}
+
+async function liveStream(verb) {
+  try {
+    S.stream = await API.post(`/api/stream/${verb}`);
+    toast(verb === "start" ? "Live stream started — new log lines arrive every second" : "Live stream stopped");
+  } catch (e) { toast(`Stream: ${e.message}`, "warn"); }
+  paintAll();
+}
+
 async function liveLogin(name, password) {
   try {
     const t = await API.post("/api/auth/login", new URLSearchParams({ username: name, password }));
@@ -836,9 +852,13 @@ let lastSig = "";
 setInterval(async () => {
   if (!S.live || !S.user || S.busy || document.hidden) return;
   try { await sync(); } catch { return; }
-  const sig = [S.incidents.length, S.audit.length, S.actions.map(a => a.status).join()].join("|");
+  const sig = [S.incidents.length, S.audit.length, S.actions.map(a => a.status).join(),
+    S.stream && S.stream.running].join("|");
   if (sig !== lastSig) { lastSig = sig; paintAll(); }
-  else if (S.route === "dashboard") { paintFeed(); paintKpis(); }
+  else if (S.route === "dashboard") {
+    paintFeed(); paintKpis();
+    const st = $("#streamstat"); if (st) st.textContent = streamStat();
+  }
 }, 3000);
 
 /* ═══ Render ══════════════════════════════════════════════════════════════ */
@@ -959,6 +979,9 @@ function dashView() {
           <b>Fetch Loghub OpenSSH</b><span>2,000 real lines · internet-facing server</span></button>
         <button data-upload ${S.user.role !== "admin" || S.busy ? "disabled" : ""}>
           <b>Upload a log file</b><span>e.g. /var/log/auth.log</span></button>
+        <button data-stream="${S.stream && S.stream.running ? "stop" : "start"}" ${S.user.role !== "admin" ? "disabled" : ""}
+          style="${S.stream && S.stream.running ? "border-color:var(--good)" : ""}">
+          <b>${S.stream && S.stream.running ? "■ Stop live stream" : "▶ Start live stream"}</b><span id="streamstat">${streamStat()}</span></button>
       </div>
       <input type="file" id="logfile" accept=".log,.txt,text/plain" hidden>
     </div>
@@ -1117,7 +1140,7 @@ function paintAll() {
 
 /* ── Events ──────────────────────────────────────────────────────────────── */
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-go],[data-inc],[data-atk],[data-approve],[data-reject],[data-rollback],[data-verify],[data-logout],[data-role],[data-ingest],[data-upload]");
+  const t = e.target.closest("[data-go],[data-inc],[data-atk],[data-approve],[data-reject],[data-rollback],[data-verify],[data-logout],[data-role],[data-ingest],[data-upload],[data-stream]");
   if (!t) return;
   if (t.dataset.role) {
     [...t.parentElement.children].forEach(b => b.setAttribute("aria-pressed", b === t));
@@ -1131,6 +1154,7 @@ document.addEventListener("click", e => {
   if (t.dataset.rollback) return rollback(+t.dataset.rollback);
   if (t.hasAttribute("data-verify")) return verify();
   if (t.dataset.ingest) return liveIngest(t.dataset.ingest);
+  if (t.dataset.stream) return liveStream(t.dataset.stream);
   if (t.hasAttribute("data-upload")) return $("#logfile").click();
   if (t.hasAttribute("data-logout")) { S.user = null; S.token = null; S.route = "dashboard"; return paintAll(); }
 });

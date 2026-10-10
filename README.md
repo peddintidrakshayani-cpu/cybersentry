@@ -76,7 +76,8 @@ the evaluation metrics at the end.
 | GET | `/api/events` | any |
 | GET | `/api/incidents` · `/api/incidents/{id}` | any |
 | POST | `/api/simulate/{S1..S5}` | admin |
-| GET | `/api/ingest/sources` | any |
+| GET | `/api/ingest/sources` · `/api/stream` | any |
+| POST | `/api/stream/start` · `/api/stream/stop` | admin |
 | POST | `/api/ingest/source/{name}` · `/api/ingest/ssh` | admin |
 | GET | `/api/actions/pending` | any |
 | POST | `/api/actions/{id}/approve` · `/reject` | any (high risk: admin only) |
@@ -106,6 +107,21 @@ sudo cat /var/log/auth.log | curl -X POST $B/api/ingest/ssh \
 
 The Loghub file (2,000 lines from an internet-facing server) raises five brute-force
 incidents, one per attacking IP. Set `CYBERSENTRY_DB` to use a different database file.
+
+**Live stream.** To keep events flowing continuously (instead of one batch), start the
+stream from the console's *Real logs* card, or with the API:
+
+```bash
+curl -X POST "$B/api/stream/start?source=replay&rate=2" -H "Authorization: Bearer $TOKEN"
+curl -X POST "$B/api/stream/stop" -H "Authorization: Bearer $TOKEN"
+```
+
+- `replay` re-sends the real Loghub lines one by one, stamped with their arrival time
+  (event source `ssh-replay`), and loops at the end.
+- `tail` follows a real, growing log file: start the server with
+  `CYBERSENTRY_TAIL=/var/log/auth.log` (the path is server config, never a request field).
+- Detection runs every 5 s over the newest 400 events. `CYBERSENTRY_STREAM=replay` starts
+  the stream with the server; `CYBERSENTRY_STREAM_RATE` sets lines per second.
 
 **Live threat intel.** For real (public) IPs, `check_ip_reputation` asks two free,
 keyless sources: [GreyNoise Community](https://api.greynoise.io/v3/community/8.8.8.8)
